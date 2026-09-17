@@ -343,8 +343,8 @@ hr{
 
 <div id="uploadSection">
 
-<p class="section-title">1. Upload ZIP GTFS (folder IBI)</p>
-<p class="section-hint">Isi ZIP: stops.txt, stop_times.txt, trips.txt, shapes.txt, routes.txt</p>
+<p class="section-title">Upload ZIP GTFS</p>
+<p class="section-hint">Isi ZIP: stops.txt, stop_times.txt, trips.txt, shapes.txt, routes.txt, route_list</p>
 <input type="file" id="zipInput" accept=".zip">
 
 <button id="processBtn">Proses Data</button>
@@ -370,8 +370,8 @@ hr{
 <label for="showStops">Tampilkan Halte</label>
 </div>
 
-<button id="filterReguler">Filter Rute Reguler</button>
-<p class="section-hint" style="margin-top:2px;">Hanya tampilkan trip yang ada di route_list.txt (kolom trip_id) di dalam ZIP</p>
+<button id="filterReguler">Filter Rute Reguler: OFF</button>
+<p class="section-hint" style="margin-top:2px;">Hanya tampilkan trip reguler</p>
 
 <div class="btn-grid">
 
@@ -619,7 +619,7 @@ document.getElementById('zipInput').addEventListener('change', function(e){
     // ZIP yang di-upload manual akan menggantikan base.zip
     loadGTFSZip(
         file,
-        "ZIP berhasil dibaca, 5 file GTFS ditemukan. Klik \"Proses Data\"."
+        "ZIP berhasil dibaca, 6 file GTFS ditemukan. Klik \"Proses Data\"."
     );
 
 });
@@ -1277,7 +1277,7 @@ document
     this.classList.toggle("active", regulerFilterActive);
     this.innerText = regulerFilterActive
         ? "Filter Rute Reguler: ON"
-        : "Filter Rute Reguler";
+        : "Filter Rute Reguler: OFF";
 
     // refresh dropdown Route & Trip biar ikut filter terbaru
     if(window.gtfsData){
