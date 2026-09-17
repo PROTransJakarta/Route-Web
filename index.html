@@ -992,7 +992,7 @@ feature.properties.route_desc
 // tooltip ngikutin kursor pas hover di garis
 layer.bindTooltip(
     "<b>Trip " + feature.properties.trip_id + "</b><br>" +
-    feature.properties.route_id + " - " + feature.properties.trip_short_name,
+    feature.properties.trip_short_name + "</b><br>" + feature.properties.route_desc,
     {
         sticky: true,
         direction: "top",
