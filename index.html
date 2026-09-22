@@ -343,8 +343,8 @@ hr{
 
 <div id="uploadSection">
 
-<p class="section-title">Upload ZIP GTFS</p>
-<p class="section-hint">Isi ZIP: stops.txt, stop_times.txt, trips.txt, shapes.txt, routes.txt, route_list</p>
+<p class="section-title">1. Upload ZIP GTFS (folder IBI)</p>
+<p class="section-hint">Isi ZIP: stops.txt, stop_times.txt, trips.txt, shapes.txt, routes.txt</p>
 <input type="file" id="zipInput" accept=".zip">
 
 <button id="processBtn">Proses Data</button>
@@ -370,8 +370,8 @@ hr{
 <label for="showStops">Tampilkan Halte</label>
 </div>
 
-<button id="filterReguler">Filter Rute Reguler: OFF</button>
-<p class="section-hint" style="margin-top:2px;">Hanya tampilkan trip reguler</p>
+<button id="filterReguler">Filter Rute Reguler</button>
+<p class="section-hint" style="margin-top:2px;">Hanya tampilkan trip yang ada di route_list.txt (kolom trip_id) di dalam ZIP</p>
 
 <div class="btn-grid">
 
@@ -474,10 +474,7 @@ L.layerGroup().addTo(map);
 
 let gtfsFiles = {};   // isi txt dari ZIP, keyed by nama file
 
-// ZIP GTFS dasar yang diletakkan satu folder dengan HTML
-const BASE_ZIP = "base.zip";
-
-// Nama file daftar trip_id rute reguler DI DALAM ZIP (base.zip maupun upload manual)
+// Nama file daftar trip_id rute reguler DI DALAM ZIP (auto-detect maupun upload manual)
 const ROUTE_LIST_FILE = "route_list.txt";
 
 let regulerTripIds = null;     // null = belum termuat, kalau sudah jadi Set berisi trip_id
@@ -531,7 +528,7 @@ function parseRouteListText(text){
 }
 
 // =========================
-// LOAD ZIP GTFS (base.zip ATAU upload manual)
+// LOAD ZIP GTFS (auto-detect dari folder ATAU upload manual)
 // =========================
 
 function loadGTFSZip(zipSource, successMessage){
@@ -591,20 +588,61 @@ function loadGTFSZip(zipSource, successMessage){
     });
 }
 
-// Coba otomatis membaca base.zip yang berada satu folder dengan HTML.
-// Jika tidak ditemukan, user tetap bisa upload ZIP secara manual.
-fetch(BASE_ZIP)
-    .then(function(response){
-        if(!response.ok){
-            throw new Error("base.zip tidak ditemukan");
-        }
-        return response.blob();
+// Coba otomatis nemuin & baca file .zip apa pun yang ada di folder yang sama dengan HTML ini.
+// Cara kerjanya: fetch folder ("./"), server lokal biasanya balikin halaman listing isi folder,
+// dari situ dicari link yang berakhiran .zip. Kalau ga ketemu (server ga kasih listing, atau
+// emang belum ada zip-nya), tetap bisa upload manual lewat tombol di sidebar.
+function findZipInFolder(){
+
+    return fetch("./")
+        .then(function(response){
+            if(!response.ok){
+                throw new Error("gagal membaca isi folder");
+            }
+            return response.text();
+        })
+        .then(function(html){
+
+            let doc = new DOMParser().parseFromString(html, "text/html");
+
+            let zipLinks = Array.from(doc.querySelectorAll("a"))
+                .map(a => a.getAttribute("href"))
+                .filter(href => href && href.toLowerCase().split("?")[0].endsWith(".zip"));
+
+            if(zipLinks.length === 0){
+                throw new Error("tidak ada file .zip di folder ini");
+            }
+
+            if(zipLinks.length > 1){
+                console.warn("Ada lebih dari satu file .zip di folder, yang dipakai: " + zipLinks[0]);
+            }
+
+            return zipLinks[0];
+
+        });
+
+}
+
+findZipInFolder()
+    .then(function(zipUrl){
+        return fetch(zipUrl).then(function(response){
+            if(!response.ok){
+                throw new Error("gagal mengambil " + zipUrl);
+            }
+            return response.blob().then(function(blob){
+                return { blob: blob, name: decodeURIComponent(zipUrl) };
+            });
+        });
     })
-    .then(function(blob){
-        loadGTFSZip(blob, "ZIP base berhasil dibaca, 5 file GTFS ditemukan. Klik \"Proses Data\".");
+    .then(function(result){
+        loadGTFSZip(
+            result.blob,
+            "ZIP \"" + result.name + "\" ditemukan otomatis di folder, 5 file GTFS terbaca. Klik \"Proses Data\"."
+        );
     })
-    .catch(function(){
-        setStatus("Belum ada data. Upload ZIP GTFS atau pastikan base.zip ada di folder yang sama dengan HTML.");
+    .catch(function(err){
+        console.warn("Auto-load ZIP gagal:", err.message);
+        setStatus("Belum ada data. Upload ZIP GTFS secara manual, atau taruh file .zip di folder yang sama dengan HTML ini.");
     });
 
 // =========================
@@ -616,10 +654,10 @@ document.getElementById('zipInput').addEventListener('change', function(e){
     const file = e.target.files[0];
     if(!file) return;
 
-    // ZIP yang di-upload manual akan menggantikan base.zip
+    // ZIP yang di-upload manual akan menggantikan ZIP yang otomatis terbaca dari folder
     loadGTFSZip(
         file,
-        "ZIP berhasil dibaca, 6 file GTFS ditemukan. Klik \"Proses Data\"."
+        "ZIP berhasil dibaca, 5 file GTFS ditemukan. Klik \"Proses Data\"."
     );
 
 });
@@ -992,7 +1030,7 @@ feature.properties.route_desc
 // tooltip ngikutin kursor pas hover di garis
 layer.bindTooltip(
     "<b>Trip " + feature.properties.trip_id + "</b><br>" +
-    feature.properties.trip_short_name + "</b><br>" + feature.properties.route_desc,
+    feature.properties.route_id + " - " + feature.properties.trip_short_name,
     {
         sticky: true,
         direction: "top",
@@ -1277,7 +1315,7 @@ document
     this.classList.toggle("active", regulerFilterActive);
     this.innerText = regulerFilterActive
         ? "Filter Rute Reguler: ON"
-        : "Filter Rute Reguler: OFF";
+        : "Filter Rute Reguler";
 
     // refresh dropdown Route & Trip biar ikut filter terbaru
     if(window.gtfsData){
