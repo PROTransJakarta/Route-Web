@@ -209,7 +209,21 @@ button:active{
 #clearMap{ background:transparent; }
 #showAll{ background:#17325c; border-color:#17325c; color:#fff; }
 #downloadRoute{ background:#17325c; border-color:#17325c; color:#fff; }
-#downloadKML{ background:#17325c; border-color:#17325c; color:#fff; grid-column: span 2; }
+
+.kml-grid{
+    display:grid;
+    grid-template-columns:1fr 1fr 1fr;
+    gap:6px;
+    margin-top:6px;
+}
+
+.kml-grid button{
+    background:#17325c;
+    border-color:#17325c;
+    color:#fff;
+    padding:8px 4px;
+    font-size:11px;
+}
 
 #filterReguler{
     width:100%;
@@ -383,7 +397,16 @@ hr{
 
 <button id="downloadRoute">Download GeoJSON</button>
 
-<button id="downloadKML">Download KML</button>
+</div>
+
+<p class="section-title" style="margin-top:14px;">Download KML (trip terpilih)</p>
+<div class="kml-grid">
+
+<button id="downloadKmlRoute">Lintasan</button>
+
+<button id="downloadKmlStops">Halte</button>
+
+<button id="downloadKmlBoth">Keduanya</button>
 
 </div>
 
@@ -1316,6 +1339,75 @@ onEachFeature: function(feature, layer){
 
 }
 
+// tampilin semua halte dari trip-trip yang lagi ditampilkan lewat "Lihat Semua"
+function addAllStopsToMap(routeId){
+
+    let shownTripIds = new Set(
+        window.gtfsData.features
+            .filter(f =>
+                (routeId == "" || f.properties.route_id == routeId) &&
+                (!regulerFilterActive || !regulerTripIds || regulerTripIds.has(String(f.properties.trip_id)))
+            )
+            .map(f => String(f.properties.trip_id))
+    );
+
+    let stopFeatures =
+        window.stopData.features.filter(
+            f => shownTripIds.has(String(f.properties.trip_id))
+        );
+
+    L.geoJSON(
+    stopFeatures,
+    {
+
+    pointToLayer:function(feature,latlng){
+
+    return L.marker(
+    latlng,
+    {
+    icon: halteIcon
+    }
+    );
+
+    },
+
+    onEachFeature: function(feature, layer){
+
+        // Tooltip cuma muncul pas kursor diarahkan ke halte
+        layer.bindTooltip(
+            "<b>" + feature.properties.stop_sequence + ". " + feature.properties.stop_name + "</b>" +
+            (feature.properties.stop_headsign ? "<br>Headsign: " + feature.properties.stop_headsign : ""),
+            {
+                direction: "top",
+                offset: [0, -14],
+                className: "halte-label"
+            }
+        );
+
+        // Popup tetap ada kalau mau lihat detail lebih lama (klik)
+        layer.bindPopup(
+            "<b>Stop Sequence :</b> " + feature.properties.stop_sequence +
+            "<br><b>Halte :</b> " + feature.properties.stop_name +
+            "<br><b>Headsign :</b> " + feature.properties.stop_headsign
+        );
+
+        // marker membesar pas di-hover biar keliatan jelas titiknya
+        layer.on("mouseover", function(){
+            this.setIcon(halteIconHover);
+        });
+
+        layer.on("mouseout", function(){
+            this.setIcon(halteIcon);
+        });
+
+    }
+
+    }
+
+    ).addTo(stopLayer);
+
+}
+
 // =========================
 // EVENT TAMBAH
 // =========================
@@ -1451,6 +1543,10 @@ document
     document.getElementById("routeSelect").value;
 
     addAllTrips(routeId);
+
+    if(document.getElementById("showStops").checked){
+        addAllStopsToMap(routeId);
+    }
 
 });
 
@@ -1694,9 +1790,8 @@ function downloadTextFile(content, fileName, mimeType){
 
 }
 
-document
-.getElementById("downloadKML")
-.addEventListener("click", function(){
+// helper: download KML buat trip yang lagi dipilih, dengan pilihan komponen mana yang diikutkan
+function performKmlDownload(includeRoute, includeStops, fileSuffix){
 
     if(!window.gtfsData || !window.stopData){
         alert("Upload dan proses data GTFS terlebih dahulu");
@@ -1710,14 +1805,21 @@ document
         return;
     }
 
-    let tripFeatures =
-        window.gtfsData.features.filter(f => f.properties.trip_id == tripId);
+    let tripFeatures = includeRoute
+        ? window.gtfsData.features.filter(f => f.properties.trip_id == tripId)
+        : [];
 
-    let stopFeatures =
-        window.stopData.features.filter(f => f.properties.trip_id == tripId);
+    let stopFeatures = includeStops
+        ? window.stopData.features.filter(f => f.properties.trip_id == tripId)
+        : [];
 
-    if(tripFeatures.length === 0){
+    if(includeRoute && tripFeatures.length === 0){
         alert("Data rute untuk trip ini tidak ditemukan");
+        return;
+    }
+
+    if(includeStops && stopFeatures.length === 0){
+        alert("Data halte untuk trip ini tidak ditemukan");
         return;
     }
 
@@ -1727,10 +1829,28 @@ document
 
     downloadTextFile(
         kml,
-        "Trip_" + safeTripId + ".kml",
+        "Trip_" + safeTripId + fileSuffix + ".kml",
         "application/vnd.google-earth.kml+xml"
     );
 
+}
+
+document
+.getElementById("downloadKmlRoute")
+.addEventListener("click", function(){
+    performKmlDownload(true, false, "_Lintasan");
+});
+
+document
+.getElementById("downloadKmlStops")
+.addEventListener("click", function(){
+    performKmlDownload(false, true, "_Halte");
+});
+
+document
+.getElementById("downloadKmlBoth")
+.addEventListener("click", function(){
+    performKmlDownload(true, true, "");
 });
 
 </script>
