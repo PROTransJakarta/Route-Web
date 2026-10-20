@@ -355,7 +355,7 @@ hr{
 <div id="header">
 <button id="sidebarToggle" title="Buka/Tutup Sidebar">&#9776;</button>
 <img id="headerLogo" src="logo_tj.png" alt="Logo TJ">
-<h1>Peta Transjakarta</h1>
+<h1>Peta Interaktif Transjakarta</h1>
 </div>
 
 <div id="layout">
@@ -464,20 +464,20 @@ document.getElementById("sidebarToggle").addEventListener("click", function(){
 var cartoLight = L.tileLayer(
 'https://basemaps.cartocdn.com/rastertiles/light_all/{z}/{x}/{y}.png?key=cb1_2rqj_1_ceecb152672cf866e0273c66',
 {
-    attribution:'© OpenStreetMap © CARTO',
+    attribution:'© OpenStreetMap © CARTO RZ',
     maxZoom:19
 });
 
 var esriSat = L.tileLayer(
 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
 {
-    attribution:'Tiles © Esri'
+    attribution:'Tiles © Esri RZ'
 });
 
 var esriStreet = L.tileLayer(
 'http://mt0.google.com/vt/lyrs=m&hl=en&x={x}&y={y}&z={z}',
 {
-    attribution: 'Tiles © Esri'
+    attribution: 'Tiles © Esri RZ'
 });
 
 // Basemap awal
