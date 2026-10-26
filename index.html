@@ -467,6 +467,28 @@ hr{
     font-style:italic;
 }
 
+.tp-stops li{
+    cursor:pointer;
+    border-radius:4px;
+    transition:background .15s ease;
+}
+.tp-stops li:hover{
+    background:#eef3fb;
+}
+.tp-stops li.active{
+    background:#e2ebf9;
+    font-weight:700;
+}
+
+/* penanda halte yang lagi dipilih */
+.stop-focus-ring{
+    animation:stopPulse 1.4s ease-out infinite;
+}
+@keyframes stopPulse{
+    0%{ stroke-opacity:1; }
+    100%{ stroke-opacity:.25; }
+}
+
 </style>
 
 </head>
@@ -1295,7 +1317,8 @@ function buildTripPopup(props, accent){
             let tag = i === 0 ? '<span class="tp-tag start">AWAL</span>'
                     : (i === stops.length - 1 ? '<span class="tp-tag end">AKHIR</span>' : '');
 
-            html += '<li class="' + cls + '">' + escapeXml(s.stop_name || "-") + tag + '</li>';
+            html += '<li class="' + cls + '" data-lat="' + s.stop_lat + '" data-lon="' + s.stop_lon + '" title="Klik untuk menuju halte ini">' + 
+                escapeXml(s.stop_name || "-") + tag + '</li>';
 
         });
 
@@ -1309,6 +1332,74 @@ function buildTripPopup(props, accent){
 
 }
 
+// =========================
+// KLIK HALTE DI POPUP -> ARAHKAN PETA
+// =========================
+
+var focusLayer = L.layerGroup().addTo(map);
+
+map.on("popupopen", function(e){
+
+    let popup = e.popup;
+    let el = popup.getElement();
+
+    // cuma untuk popup lintasan, dan jangan pasang listener dobel
+    if(!el || !el.querySelector(".tp-stops") || el._stopClickBound) return;
+    el._stopClickBound = true;
+
+    el.addEventListener("click", function(ev){
+
+        let li = ev.target.closest(".tp-stops li");
+        if(!li) return;
+
+        let lat = parseFloat(li.getAttribute("data-lat"));
+        let lon = parseFloat(li.getAttribute("data-lon"));
+        if(isNaN(lat) || isNaN(lon)) return;
+
+        let ll = L.latLng(lat, lon);
+
+        // tandai halte yang aktif di daftar
+        el.querySelectorAll(".tp-stops li.active").forEach(function(x){
+            x.classList.remove("active");
+        });
+        li.classList.add("active");
+
+        // lingkaran penanda di peta
+        focusLayer.clearLayers();
+        L.circleMarker(ll, {
+            radius: 13,
+            color: "#d93a32",
+            weight: 4,
+            fillColor: "#ffffff",
+            fillOpacity: 0.6,
+            className: "stop-focus-ring"
+        }).bindTooltip(li.childNodes[0].textContent, {
+            permanent: true,
+            direction: "bottom",
+            offset: [0, 10],
+            className: "halte-label"
+        }).addTo(focusLayer);
+
+        // pindahkan ujung popup ke halte (tanpa me-render ulang isinya,
+        // jadi posisi scroll daftar tidak reset)
+        popup._latlng = ll;
+        popup._updatePosition();
+
+        // terbang ke halte; pusat digeser ke atas biar popup yang
+        // menjulang ke atas tetap kelihatan semua
+        let z = Math.max(map.getZoom(), 16);
+        let pt = map.project(ll, z).subtract([0, 160]);
+        map.flyTo(map.unproject(pt, z), z, { duration: 0.8 });
+
+    });
+
+});
+
+// penanda dihapus kalau popup ditutup
+map.on("popupclose", function(){
+    focusLayer.clearLayers();
+});
+    
 function addTripToMap(tripId){
 
 let selectedFeatures =
@@ -1647,6 +1738,7 @@ document
     // Hapus layer
     selectedRouteLayer.clearLayers();
     stopLayer.clearLayers();
+    focusLayer.clearLayers();
 
     // Reset Route
     $('#routeSelect').val('').trigger('change');
