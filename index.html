@@ -26,7 +26,7 @@ href="https://unpkg.com/leaflet/dist/leaflet.css"/>
 
     /* --- logo slot (change here or replace ./logo-tj.png; no JS needed) --- */
     --logo-h:34px;
-    --logo-plate:#ffffff;
+    --logo-plate:transparent;
 
     /* --- semantic tokens: LIGHT --- */
     --sb-bg:var(--c-navy);
@@ -77,7 +77,7 @@ href="https://unpkg.com/leaflet/dist/leaflet.css"/>
         --map-ctl-bg:#1a2152;
         --map-ctl-fg:#8fc0e6;
         --map-ctl-hover:#27306b;
-        --logo-plate:#ffffff;
+        --logo-plate:transparent;
     }
 }
 
@@ -308,6 +308,35 @@ select.ctl{ appearance:auto; }
 .layer-item.is-focus{ border-left-color:var(--c-yellow); background:var(--hl-soft); }
 .li-cmp{ width:16px; height:16px; margin:0; accent-color:var(--c-blue); cursor:pointer; }
 .li-sw{ display:inline-block; width:14px; height:14px; border-radius:4px; flex-shrink:0; vertical-align:-2px; box-shadow:inset 0 0 0 1px rgba(0,0,0,.25); }
+.li-color{
+    width:28px;
+    height:28px;
+    padding:2px;
+    border:1px solid var(--border);
+    border-radius:7px;
+    background:var(--card);
+    cursor:pointer;
+    flex-shrink:0;
+}
+
+.li-color:disabled{
+    opacity:.4;
+    cursor:not-allowed;
+}
+
+.li-color::-webkit-color-swatch-wrapper{
+    padding:0;
+}
+
+.li-color::-webkit-color-swatch{
+    border:none;
+    border-radius:4px;
+}
+
+.li-color::-moz-color-swatch{
+    border:none;
+    border-radius:4px;
+}
 .li-txt{ min-width:0; }
 .li-title{ font-size:12.5px; font-weight:700; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
 .li-sub{ font-size:10.5px; color:var(--text2); }
@@ -789,6 +818,7 @@ select{ width:100%; }
                 <select id="colorMode" class="ctl">
                     <option value="distinct">Distinct colours</option>
                     <option value="gtfs">GTFS route colour</option>
+                    <option value="custom">Custom colour</option>
                 </select>
             </div>
             <div id="layerList" class="layer-list"></div>
@@ -3293,9 +3323,13 @@ function entryColor(e){
         let g = gtfsColorOf(e);
         if(g) return g;
     }
+
+    if(colorMode === 'custom'){
+        return e.customColor || e.distinct;
+    }
+
     return e.distinct;
 }
-
 function buildLineLayer(entry, features){
 
     let isTrip = entry.type === 'trip';
@@ -3390,6 +3424,7 @@ function makeEntry(cfg){
     };
     e.tripSet = new Set(e.tripIds);
     e.distinct = distinctColorFor(e.key);
+    e.customColor = e.distinct;
     e.color = entryColor(e);
     e.layer = buildLineLayer(e, cfg.features);
     registry.set(e.key, e);
@@ -3581,12 +3616,17 @@ function setAllStops(on){
 
 function setColorMode(m){
     colorMode = m;
+
     registry.forEach(function(e){
         e.color = entryColor(e);
-        e.layer.setStyle({ color: e.color });
+
+        e.layer.setStyle({
+            color: e.color
+        });
     });
+
     changed(true);
-    // overlap participants keep their colour from layers -> refresh summary swatches
+
     Overlap.refreshSwatches();
 }
 
@@ -3656,7 +3696,7 @@ function renderLayerPanel(){
         html +=
         '<div class="layer-item' + (e.visible ? '' : ' is-hidden') + '" data-key="' + esc(e.key) + '">' +
             '<input type="checkbox" class="li-cmp" title="Include in comparison, overlap analysis and exports"' + (e.compare ? ' checked' : '') + '>' +
-            '<span class="li-sw" style="background:' + e.color + '"></span>' +
+            '<input type="color" class="li-color" value="' + e.color + '" title="Choose layer colour" ' + (colorMode !== 'custom' ? 'disabled' : '') + '>' +
             '<div class="li-txt"><div class="li-title" title="' + esc(entryTitle(e)) + '">' + (e.type === 'route' ? 'Route ' : '') + esc(entryTitle(e)) + '</div>' +
             '<div class="li-sub">' + sub + '</div></div>' +
             '<div class="li-act">' +
@@ -4779,6 +4819,29 @@ $id('layerList').addEventListener('change', function(ev){
     changed(true);
 });
 
+$id('layerList').addEventListener('input', function(ev){
+    if(!ev.target.classList.contains('li-color')) return;
+    if(colorMode !== 'custom') return;
+
+    let item = ev.target.closest('.layer-item');
+    if(!item) return;
+
+    let e = registry.get(item.getAttribute('data-key'));
+    if(!e) return;
+
+    e.customColor = ev.target.value;
+    e.color = e.customColor;
+
+    // Update the actual Leaflet route layer
+    e.layer.setStyle({
+        color: e.color
+    });
+
+    // Refresh layer list, map legend and analysis swatches
+    changed(true);
+    Overlap.refreshSwatches();
+});
+    
 $id('colorMode').addEventListener('change', function(){ setColorMode(this.value); });
 
 $id('addRouteBtn').addEventListener('click', function(){
