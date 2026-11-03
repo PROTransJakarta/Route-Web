@@ -3354,7 +3354,7 @@ function buildLineLayer(entry, features){
             );
 
             layer.on("mouseover", function(){
-                this.setStyle(isTrip ? { weight: 10 }});
+                this.setStyle(isTrip ? { weight: 10 } : { weight: 10, color: "#000000" });
                 this.bringToFront();
             });
             layer.on("mouseout", function(){
