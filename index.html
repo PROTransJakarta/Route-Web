@@ -338,6 +338,15 @@ select.ctl{ appearance:auto; }
     border-radius:4px;
 }
 .li-txt{ min-width:0; }
+/* MODIFIED: Active-Layer colour -- HEX field (+ imported-layer rows) */
+.li-hex{ width:84px; height:22px; margin-top:3px; padding:0 6px; border:1px solid var(--border); border-radius:6px; background:var(--card); color:var(--text); font-family:ui-monospace,Consolas,monospace; font-size:11px; text-transform:uppercase; outline:none; }
+.li-hex:focus{ border-color:var(--c-accent); box-shadow:0 0 0 2px rgba(41,116,176,.25); }
+.li-hex.invalid{ border-color:var(--err); box-shadow:0 0 0 2px var(--err-soft); }
+.layer-item.is-ext .li-sub::before{ content:"Imported \00b7 "; font-weight:700; }
+/* MODIFIED: Remove black outline around clicked routes (browser focus ring drawn on the clicked SVG path) */
+.leaflet-container .leaflet-interactive:focus,
+.leaflet-container path:focus,
+.leaflet-container svg:focus{ outline:none !important; }
 .li-title{ font-size:12.5px; font-weight:700; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
 .li-sub{ font-size:10.5px; color:var(--text2); }
 .li-act{ display:flex; gap:2px; }
@@ -826,6 +835,12 @@ select{ width:100%; }
                 <button class="btn small accent" id="addRouteBtn" title="Adds the Route selected above as one group layer">+ Add Route</button>
                 <button class="btn small danger" id="removeAllLayers">Remove All Layers</button>
             </div>
+            <!-- MODIFIED: External Layers (import .kml / .geojson / .json / .shp) -->
+            <div class="btn-row" style="grid-template-columns:1fr;">
+                <button class="btn small accent" id="extImportBtn" title="Import .kml, .geojson/.json, .shp (select .shp + .dbf + .prj + .shx together) or a zipped shapefile">+ Import Layer (KML / GeoJSON / SHP)</button>
+            </div>
+            <input type="file" id="extFile" accept=".kml,.geojson,.json,.shp,.dbf,.prj,.shx,.cpg,.zip" multiple hidden>
+            <div id="extNote" class="note empty" hidden></div>
             <p class="hint">Tick a layer to include it in comparison, overlap analysis and exports. Eye = show/hide, target = zoom, pin = stops, &times; = remove.</p>
         </div>
     </details>
@@ -855,11 +870,11 @@ select{ width:100%; }
     <!-- Overlap -->
     <div class="sub-panel" id="foldOverlap" hidden>
         <h2 class="panel-title">Route overlap analysis</h2>
-        <p class="panel-desc">Finds shared corridors between the layers ticked in Active Layers.</p>
+        <p class="panel-desc">Finds shared corridors (buffer + clip) between the layers ticked in Active Layers only.</p>
         <div class="form-grid">
             <label>Tolerance (m)<input type="number" id="ovTol" class="ctl" value="15" min="3" max="100" step="1"></label>
-            <label>Angle (&deg;)<input type="number" id="ovAngle" class="ctl" value="20" min="5" max="60" step="1"></label>
-            <label>Min corridor (m)<input type="number" id="ovMin" class="ctl" value="100" min="20" max="5000" step="10"></label>
+            <label>Angle (&deg;)<input type="number" id="ovAngle" class="ctl" value="20" min="5" max="60" step="1" disabled title="Not used by the buffer + clip method"></label>
+            <label>Min corridor (m)<input type="number" id="ovMin" class="ctl" value="400" min="20" max="5000" step="10"></label>
             <label>Compare by
                 <select id="ovUnit" class="ctl">
                     <option value="route">Route (trips merged)</option>
@@ -877,10 +892,31 @@ select{ width:100%; }
         </div>
         <div id="ovNote" class="note empty"></div>
         <div id="ovResult" class="ov-result"></div>
+
+        <!-- MODIFIED: Overlap Analysis -- selected-route buffer -->
+        <div class="sub-title">Selected-route buffer</div>
+        <p class="panel-desc">Buffers the route chosen under <b>Route &amp; trip selection</b> and lists every other GTFS route (and imported layer) that touches the buffer.</p>
+        <div class="form-grid">
+            <label>Buffer (m)<input type="number" id="ovBuf" class="ctl" value="15" min="10" max="20" step="1"></label>
+            <label>Min overlap (m)<input type="number" id="ovBufMin" class="ctl" value="400" min="0" max="5000" step="50" title="Overlaps shorter than this (corners, crossings) are ignored"></label>
+            <label>Buffer source
+                <select id="ovBufSrc" class="ctl"><option value="">Route selected in Filter</option></select>
+            </label>
+        </div>
+        <div class="btn-row">
+            <button class="btn small primary" id="ovBufRun">Analyze Buffer</button>
+            <button class="btn small" id="ovBufClear">Clear</button>
+        </div>
+        <div id="ovBufNote" class="note empty"></div>
+        <div id="ovBufResult" class="ov-result"></div>
+        <details class="method">
+            <summary>Buffer method</summary>
+            <p>The selected route's GTFS <code>shapes</code> and every other shape are projected to a local metric plane. The buffer is every point within the chosen distance (10&ndash;20 m) of the route line, with rounded joins and caps; a route is reported when a continuous stretch of its line of at least the minimum overlap (default 400 m) lies inside that buffer; shorter touches such as corners and crossings are ignored, and gaps under about 30 m are bridged. The selected route itself is never listed. <i>Overlap km</i> is the longest overlap of any single shape of a route (directions and variants are not added together). Imported polygons are compared by their outline; points are ignored.</p>
+        </details>
         <details class="method">
             <summary>Method &amp; limitations</summary>
-            <p>Routes are resampled into short pieces and projected to a local metric plane. Two pieces match when they run within the tolerance of each other (both directions) and their bearings differ by less than the angle &ndash; direction is ignored, so reversed routes match. All shapes of one route are merged first, so several trips of the same route count once. A shared stretch is reported once, with the set of routes that share it; stretches shorter than the minimum length are ignored.</p>
-            <p><b>Limitations:</b> pure geometry matching without a road network. Parallel roads (e.g. busway beside a carriageway) closer than the tolerance may be merged; imprecise or differently digitised shapes may be missed. "Likely / Probable / Uncertain" is a heuristic from the average offset relative to the tolerance and the corridor length, not a probability &ndash; check uncertain (dashed) matches visually.</p>
+            <p>Each ticked route is buffered by the tolerance (round joins and caps, local metric plane) and every other ticked route is clipped by that buffer. Only continuous stretches of at least the minimum corridor length are kept, so corner touches and crossings are ignored; direction is ignored. Only the layers ticked in Active Layers are compared &ndash; the rest of the GTFS data is not used. Each pair of routes is reported once, so three routes on one road appear as three overlapping pairs; <i>Unique shared length</i> counts every stretch only once.</p>
+            <p><b>Limitations:</b> pure geometry, no road network. Parallel roads closer than the buffer may be merged, and imprecise or differently digitised shapes may be missed. The angle setting is not used by this method.</p>
         </details>
     </div>
 
@@ -1114,6 +1150,8 @@ select{ width:100%; }
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<!-- MODIFIED: External Layers -- shapefile reader (.shp/.dbf/.prj, reprojects to WGS84) -->
+<script src="https://cdn.jsdelivr.net/npm/shpjs@4.0.4/dist/shp.min.js"></script>
 
 <script>
 
@@ -1121,7 +1159,9 @@ select{ width:100%; }
 // BUAT PETA
 // =========================
 
-var map = L.map('map', { zoomControl: false })
+// MODIFIED: Zoom -- gentler steps: +/- button and keyboard move half a level, the mouse wheel / trackpad needs
+// about twice the scroll distance per level (default 60 px), and zoom may rest on quarter levels
+var map = L.map('map', { zoomControl: false, zoomSnap: 0.25, zoomDelta: 0.5, wheelPxPerZoomLevel: 120, wheelDebounceTime: 60 })
 .setView([-6.2,106.8],11);
 
 L.control.zoom({
@@ -3354,7 +3394,8 @@ function buildLineLayer(entry, features){
             );
 
             layer.on("mouseover", function(){
-                this.setStyle(isTrip ? { weight: 10 } : { weight: 10, color: "#000000" });
+                // MODIFIED: Black outline -- hover keeps the layer colour (was forced to #000000 for route groups)
+                this.setStyle({ weight: 10 });
                 this.bringToFront();
             });
             layer.on("mouseout", function(){
@@ -3614,6 +3655,30 @@ function setAllStops(on){
     changed(true);
 }
 
+// MODIFIED: Active-Layer colour -- HEX parsing + in-place update.
+// The list is deliberately NOT re-rendered while a colour is being chosen: re-rendering replaced the <input type="color">
+// on every 'input' event, which closed the native picker and broke click / hold / drag.
+function hexParse(str){
+    let h = String(str || '').trim().replace(/^#/, '');
+    if(/^[0-9a-fA-F]{3}$/.test(h)) h = h.replace(/./g, function(c){ return c + c; });
+    return /^[0-9a-fA-F]{6}$/.test(h) ? ('#' + h.toLowerCase()) : null;
+}
+function syncColorInputs(item, hex){
+    if(!item) return;
+    let c = item.querySelector('.li-color'), h = item.querySelector('.li-hex');
+    if(c && c.value !== hex) c.value = hex;
+    if(h && document.activeElement !== h){ h.value = hex.toUpperCase(); h.classList.remove('invalid'); }
+}
+function applyEntryColor(e, hex, item){
+    e.customColor = hex;
+    e.color = hex;
+    e.layer.setStyle({ color: hex });
+    syncColorInputs(item, hex);
+    renderLegend();
+    Compare.markDirty();
+    Overlap.refreshSwatches();
+}
+
 function setColorMode(m){
     colorMode = m;
 
@@ -3683,7 +3748,7 @@ function renderLayerPanel(){
 
     $id('layerCount').textContent = registry.size;
 
-    if(!registry.size){
+    if(!registry.size && !ExtLayers.entries().length){   // MODIFIED: External Layers
         list.innerHTML = '<div class="note empty">No active layers. Choose a Route/Trip and press Load, or Show All.</div>';
         return;
     }
@@ -3698,7 +3763,10 @@ function renderLayerPanel(){
             '<input type="checkbox" class="li-cmp" title="Include in comparison, overlap analysis and exports"' + (e.compare ? ' checked' : '') + '>' +
             '<input type="color" class="li-color" value="' + e.color + '" title="Choose layer colour" ' + (colorMode !== 'custom' ? 'disabled' : '') + '>' +
             '<div class="li-txt"><div class="li-title" title="' + esc(entryTitle(e)) + '">' + (e.type === 'route' ? 'Route ' : '') + esc(entryTitle(e)) + '</div>' +
-            '<div class="li-sub">' + sub + '</div></div>' +
+            '<div class="li-sub">' + sub + '</div>' +
+            // MODIFIED: Active-Layer colour -- HEX field (custom colour mode only)
+            (colorMode === 'custom' ? '<input type="text" class="li-hex" value="' + String(e.color).toUpperCase() + '" maxlength="7" spellcheck="false" placeholder="#RRGGBB" title="HEX colour, e.g. #1C418A" aria-label="HEX colour">' : '') +
+            '</div>' +
             '<div class="li-act">' +
                 '<button data-act="vis" title="' + (e.visible ? 'Hide layer' : 'Show layer') + '">' + (e.visible ? ICON.eye : ICON.eyeOff) + '</button>' +
                 '<button data-act="zoom" title="Zoom to layer">' + ICON.zoom + '</button>' +
@@ -3707,6 +3775,23 @@ function renderLayerPanel(){
             '</div>' +
         '</div>';
     });
+    // MODIFIED: External Layers -- imported layers are listed after the GTFS layers
+    ExtLayers.entries().forEach(function(x){
+        html +=
+        '<div class="layer-item is-ext' + (x.visible ? '' : ' is-hidden') + '" data-ext="' + esc(x.id) + '">' +
+            '<input type="checkbox" class="li-cmp" title="Use as a comparison layer in the buffer analysis"' + (x.compare ? ' checked' : '') + '>' +
+            '<input type="color" class="li-color" value="' + x.color + '" title="Choose layer colour">' +
+            '<div class="li-txt"><div class="li-title" title="' + esc(x.name) + '">' + esc(x.name) + '</div>' +
+            '<div class="li-sub">' + x.nFeat + ' feature' + (x.nFeat === 1 ? '' : 's') + '</div>' +
+            '<input type="text" class="li-hex" value="' + x.color.toUpperCase() + '" maxlength="7" spellcheck="false" placeholder="#RRGGBB" title="HEX colour, e.g. #1C418A" aria-label="HEX colour"></div>' +
+            '<div class="li-act">' +
+                '<button data-act="vis" title="' + (x.visible ? 'Hide layer' : 'Show layer') + '">' + (x.visible ? ICON.eye : ICON.eyeOff) + '</button>' +
+                '<button data-act="zoom" title="Zoom to layer">' + ICON.zoom + '</button>' +
+                '<button data-act="rm" class="rm" title="Remove imported layer">' + ICON.x + '</button>' +
+            '</div>' +
+        '</div>';
+    });
+
     list.innerHTML = html;
 }
 
@@ -3729,6 +3814,13 @@ function renderLegend(){
              '<div class="lg-row"><span class="lg-bar" style="background:#ff3b30"></span><span class="lg-t">Shared by 3</span></div>' +
              '<div class="lg-row"><span class="lg-bar" style="background:#af52de"></span><span class="lg-t">Shared by 4+</span></div>' +
              '<div class="lg-row"><span class="lg-bar dashed"></span><span class="lg-t">Dashed = uncertain match</span></div>';
+    }
+
+    // MODIFIED: Overlap Analysis -- buffer legend
+    if(Overlap.hasBufferResult()){
+        ov += '<div class="lg-sep"></div>' +
+              '<div class="lg-row"><span class="lg-bar" style="background:#1C418A;opacity:.35"></span><span class="lg-t">Route buffer (' + Overlap.bufferMeters() + ' m)</span></div>' +
+              '<div class="lg-row"><span class="lg-bar" style="background:#ff9500"></span><span class="lg-t">Existing route inside buffer</span></div>';
     }
 
     if(!items.length && !ov){ box.hidden = true; return; }
@@ -3761,6 +3853,274 @@ LayerManager = {
     get: function(k){ return registry.get(k); }
 };
 window.LayerManager = LayerManager;
+
+// =====================================================================
+// MODIFIED: External Layers -- import .kml / .geojson / .json / .shp (+ .dbf .prj .shx) / zipped shapefile
+// Imported layers have their OWN registry and map group: the GTFS data, registry and map groups are never touched.
+// =====================================================================
+// MODIFIED: External Layers -- file parsing helpers (KML / GeoJSON); shapefiles are decoded by shp.js
+function kmlToGeoJSON(text){
+    let doc = new DOMParser().parseFromString(text, 'application/xml');
+    if(doc.getElementsByTagName('parsererror').length) throw new Error('invalid KML (XML could not be parsed).');
+
+    function elKids(el, name){
+        let out = [];
+        for(let n = el.firstChild; n; n = n.nextSibling){
+            if(n.nodeType === 1 && (!name || (n.localName || n.nodeName.replace(/^.*:/, '')) === name)) out.push(n);
+        }
+        return out;
+    }
+    function nm(el){ return el.localName || el.nodeName.replace(/^.*:/, ''); }
+    function coords(s){
+        return String(s || '').trim().split(/\s+/).map(function(t){
+            let a = t.split(',').map(Number);
+            return (a.length >= 2 && isFinite(a[0]) && isFinite(a[1])) ? [a[0], a[1]] : null;
+        }).filter(Boolean);
+    }
+    function coordText(el){ let c = elKids(el, 'coordinates')[0]; return c ? c.textContent : ''; }
+    function ringOf(el){ let lr = elKids(el, 'LinearRing')[0]; return lr ? coords(coordText(lr)) : []; }
+    function geomOf(el, out){
+        switch(nm(el)){
+            case 'Point': { let a = coords(coordText(el)); if(a.length) out.push({ type: 'Point', coordinates: a[0] }); break; }
+            case 'LineString': case 'LinearRing': { let a = coords(coordText(el)); if(a.length >= 2) out.push({ type: 'LineString', coordinates: a }); break; }
+            case 'Polygon': {
+                let rings = [];
+                elKids(el, 'outerBoundaryIs').forEach(function(o){ let r = ringOf(o); if(r.length >= 3) rings.push(r); });
+                elKids(el, 'innerBoundaryIs').forEach(function(o){ let r = ringOf(o); if(r.length >= 3) rings.push(r); });
+                if(rings.length) out.push({ type: 'Polygon', coordinates: rings });
+                break;
+            }
+            case 'Track': {                                   // gx:Track (GPS tracks from Google Earth)
+                let a = elKids(el, 'coord').map(function(c){ let v = c.textContent.trim().split(/\s+/).map(Number); return (isFinite(v[0]) && isFinite(v[1])) ? [v[0], v[1]] : null; }).filter(Boolean);
+                if(a.length >= 2) out.push({ type: 'LineString', coordinates: a });
+                break;
+            }
+            case 'MultiGeometry': case 'MultiTrack': elKids(el).forEach(function(c){ geomOf(c, out); }); break;
+        }
+    }
+
+    let features = [];
+    let pms = doc.getElementsByTagName('Placemark');
+    for(let i = 0; i < pms.length; i++){
+        let pm = pms[i], gs = [];
+        elKids(pm).forEach(function(c){ geomOf(c, gs); });
+        if(!gs.length) continue;
+        let n = elKids(pm, 'name')[0], d = elKids(pm, 'description')[0];
+        let props = {};
+        if(n) props.name = n.textContent.trim();
+        if(d) props.description = d.textContent.trim();
+        gs.forEach(function(g){ features.push({ type: 'Feature', geometry: g, properties: props }); });
+    }
+    if(!features.length) throw new Error('no Point / LineString / Polygon placemarks found in the KML.');
+    return { type: 'FeatureCollection', features: features };
+}
+
+// any GeoJSON value -> FeatureCollection (features without geometry dropped)
+function toFC(g){
+    if(!g || typeof g !== 'object') throw new Error('not a valid GeoJSON object.');
+    let fc;
+    if(g.type === 'FeatureCollection' && Array.isArray(g.features)) fc = g;
+    else if(g.type === 'Feature') fc = { type: 'FeatureCollection', features: [g] };
+    else if(/^(Point|MultiPoint|LineString|MultiLineString|Polygon|MultiPolygon|GeometryCollection)$/.test(g.type))
+        fc = { type: 'FeatureCollection', features: [{ type: 'Feature', geometry: g, properties: {} }] };
+    else throw new Error('not GeoJSON (a FeatureCollection, Feature or geometry is expected).');
+    fc = { type: 'FeatureCollection', features: fc.features.filter(function(f){ return f && f.geometry && f.geometry.type; }) };
+    if(!fc.features.length) throw new Error('the file contains no features with geometry.');
+    return fc;
+}
+
+function eachCoordOf(geom, fn){
+    if(!geom) return;
+    if(geom.type === 'GeometryCollection'){ (geom.geometries || []).forEach(function(g){ eachCoordOf(g, fn); }); return; }
+    (function walk(a){
+        if(!Array.isArray(a)) return;
+        if(typeof a[0] === 'number'){ fn(a); return; }
+        a.forEach(walk);
+    })(geom.coordinates);
+}
+
+// every vertex must be a plausible WGS84 lon/lat, otherwise the file is most likely projected
+function assertWGS84(fc){
+    let bad = 0, n = 0;
+    fc.features.forEach(function(f){ eachCoordOf(f.geometry, function(c){ n++; if(!(Math.abs(c[0]) <= 180 && Math.abs(c[1]) <= 90)) bad++; }); });
+    if(!n) throw new Error('the file has no coordinates.');
+    if(bad) throw new Error('coordinates are outside the WGS84 lon/lat range (' + bad + ' vertices) \u2013 the data looks projected. Export it as WGS84 (EPSG:4326), or for a shapefile include the .prj file.');
+}
+
+// line work usable by the buffer analysis: lines as-is, polygon outlines (rings); points are ignored
+function linesOf(fc){
+    let out = [];
+    function add(g){
+        if(!g) return;
+        switch(g.type){
+            case 'LineString': if(g.coordinates.length >= 2) out.push(g.coordinates); break;
+            case 'MultiLineString': g.coordinates.forEach(function(l){ if(l.length >= 2) out.push(l); }); break;
+            case 'Polygon': g.coordinates.forEach(function(r){ if(r.length >= 2) out.push(r); }); break;
+            case 'MultiPolygon': g.coordinates.forEach(function(p){ p.forEach(function(r){ if(r.length >= 2) out.push(r); }); }); break;
+            case 'GeometryCollection': (g.geometries || []).forEach(add); break;
+        }
+    }
+    fc.features.forEach(function(f){ add(f.geometry); });
+    return out;
+}
+
+const ExtLayers = (function(){
+
+    const group = L.layerGroup().addTo(map);
+    const items = new Map();
+    let seq = 0;
+    const PALETTE = ['#ff1493', '#00a86b', '#ff6d00', '#6200ea', '#00b8d4', '#c51162', '#827717', '#4e342e'];
+
+    function styleOf(x){
+        return function(f){
+            let t = f && f.geometry ? f.geometry.type : '';
+            if(/Point/.test(t)) return { color: x.color, weight: 2, fillColor: '#ffffff', fillOpacity: 0.9 };
+            if(/Polygon/.test(t)) return { color: x.color, weight: 3, opacity: 0.95, fillColor: x.color, fillOpacity: 0.12 };
+            return { color: x.color, weight: 4, opacity: 0.95, dashArray: '10 6' };
+        };
+    }
+
+    function popupHtml(x, p){
+        let rows = [];
+        Object.keys(p || {}).forEach(function(k){
+            let v = p[k];
+            if(v === null || v === undefined || v === '' || typeof v === 'object' || rows.length >= 14) return;
+            rows.push('<tr><td style="color:#64748b;padding:2px 10px 2px 0;vertical-align:top">' + esc(k) + '</td><td style="font-weight:600;word-break:break-word">' + esc(String(v).slice(0, 300)) + '</td></tr>');
+        });
+        return '<div style="font-size:12px;line-height:1.5;max-width:280px"><b>' + esc(x.name) + '</b>' +
+               (rows.length ? '<table style="margin-top:4px;border-collapse:collapse">' + rows.join('') + '</table>' : '') + '</div>';
+    }
+
+    function entries(){ return Array.from(items.values()); }
+    function get(id){ return items.get(id) || null; }
+
+    function refreshSources(){
+        let sel = $id('ovBufSrc');
+        if(!sel) return;
+        let prev = sel.value;
+        sel.innerHTML = '<option value="">Route selected in Filter</option>' +
+            entries().map(function(x){ return '<option value="' + esc(x.id) + '">Imported: ' + esc(x.name) + '</option>'; }).join('');
+        sel.value = items.has(prev) ? prev : '';
+    }
+
+    function add(name, fc){
+        assertWGS84(fc);
+        let x = { id: 'ext:' + (++seq), name: name, color: PALETTE[seq % PALETTE.length], visible: true, compare: true,
+                  fc: fc, lines: linesOf(fc), nFeat: fc.features.length, layer: null };
+        x.styleFn = styleOf(x);
+        x.layer = L.geoJSON(fc, {
+            style: x.styleFn,
+            pointToLayer: function(f, ll){ return L.circleMarker(ll, { radius: 5 }); },
+            onEachFeature: function(f, layer){
+                layer.bindPopup(function(){ return popupHtml(x, f.properties); }, { maxWidth: 300 });
+                let p = f.properties || {}, nm = p.name || p.Name || p.NAME;
+                if(nm) layer.bindTooltip(esc(String(nm)), { sticky: true });
+            }
+        });
+        items.set(x.id, x);
+        group.addLayer(x.layer);
+        refreshSources();
+        changed(true);
+        return x;
+    }
+
+    function setVisible(id, v){
+        let x = items.get(id); if(!x) return;
+        x.visible = !!v;
+        if(x.visible) group.addLayer(x.layer); else group.removeLayer(x.layer);
+        changed(true);
+    }
+    function zoom(id){
+        let x = items.get(id); if(!x) return;
+        if(!x.visible) setVisible(id, true);
+        let b = x.layer.getBounds();
+        if(b && b.isValid()) fitWithSidebar(b); else toast('This layer has no valid bounds.', 'warn');
+    }
+    function remove(id){
+        let x = items.get(id); if(!x) return;
+        group.removeLayer(x.layer);
+        items.delete(id);
+        Overlap.dropExt(id);
+        refreshSources();
+        changed(true);
+        toast('Removed imported layer "' + x.name + '".', 'ok');
+    }
+    function setColor(id, hex, item){
+        let x = items.get(id); if(!x) return;
+        x.color = hex;
+        x.layer.setStyle(x.styleFn);
+        syncColorInputs(item, hex);
+    }
+    function action(id, act){
+        if(act === 'vis'){ let x = items.get(id); if(x) setVisible(id, !x.visible); }
+        else if(act === 'zoom') zoom(id);
+        else if(act === 'rm') remove(id);
+    }
+    function setCompare(id, v){ let x = items.get(id); if(x) x.compare = !!v; }
+
+    async function importFiles(files){
+        if(!files.length) return;
+        let note = $id('extNote');
+        note.hidden = false;
+        setNote(note, 'loading', 'Reading ' + files.length + ' file(s)\u2026');
+
+        let ok = 0, msgs = [], parts = new Map();
+
+        for(let i = 0; i < files.length; i++){
+            let f = files[i];
+            let m = f.name.match(/^(.*)\.([^.]+)$/), base = m ? m[1] : f.name, ext = m ? m[2].toLowerCase() : '';
+            try {
+                if(ext === 'kml'){ add(base, kmlToGeoJSON(await f.text())); ok++; }
+                else if(ext === 'geojson' || ext === 'json'){ add(base, toFC(JSON.parse(await f.text()))); ok++; }
+                else if(ext === 'zip'){
+                    if(typeof window.shp !== 'function') throw new Error('the shapefile reader (shp.js) did not load \u2013 check your internet connection.');
+                    let res = await window.shp(await f.arrayBuffer());
+                    (Array.isArray(res) ? res : [res]).forEach(function(fc){ add(fc.fileName || base, toFC(fc)); ok++; });
+                }
+                else if(/^(shp|dbf|prj|shx|cpg)$/.test(ext)){
+                    let k = base.toLowerCase();
+                    if(!parts.has(k)) parts.set(k, { name: base });
+                    parts.get(k)[ext] = f;
+                }
+                else msgs.push(f.name + ': unsupported file type');
+            } catch(err){ console.error(err); msgs.push(f.name + ': ' + err.message); }
+        }
+
+        for(const g of parts.values()){
+            try {
+                if(!g.shp){ msgs.push(g.name + ': the .shp file is missing (select .shp together with its .dbf / .prj / .shx).'); continue; }
+                if(typeof window.shp !== 'function') throw new Error('the shapefile reader (shp.js) did not load \u2013 check your internet connection.');
+                let prj = g.prj ? await g.prj.text() : undefined;
+                let geoms = window.shp.parseShp(await g.shp.arrayBuffer(), prj);
+                let rows = null;
+                if(g.dbf){
+                    try { rows = window.shp.parseDbf(await g.dbf.arrayBuffer(), g.cpg ? (await g.cpg.text()).trim() : undefined); }
+                    catch(e2){ msgs.push(g.name + ': attribute table (.dbf) could not be read \u2013 geometry only.'); }
+                }
+                if(!g.prj) msgs.push(g.name + ': no .prj \u2013 coordinates assumed to be WGS84 lon/lat.');
+                add(g.name, toFC(window.shp.combine([geoms, rows])));
+                ok++;
+            } catch(err){ console.error(err); msgs.push(g.name + '.shp: ' + err.message); }
+        }
+
+        if(ok){
+            let last = entries()[entries().length - 1];
+            if(last) zoom(last.id);
+            setNote(note, msgs.length ? 'warn' : 'ok', 'Imported ' + ok + ' layer(s).' + (msgs.length ? ' ' + msgs.join(' ') : ''));
+        } else {
+            setNote(note, 'error', 'Nothing imported. ' + (msgs.join(' ') || 'No supported file selected.'));
+        }
+    }
+
+    $id('extImportBtn').addEventListener('click', function(){ $id('extFile').click(); });
+    $id('extFile').addEventListener('change', function(ev){
+        let files = Array.from(ev.target.files || []);
+        ev.target.value = '';                        // allows re-importing the same file
+        importFiles(files);
+    });
+
+    return { entries: entries, get: get, setColor: setColor, setCompare: setCompare, action: action };
+})();
 
 // ---------------------------------------------------------------
 // 6. ROUTE COMPARISON  (table + warnings; legend is the map legend above)
@@ -4133,9 +4493,348 @@ function computeOverlap(participants, params, onProgress){
     })();
 }
 
+// MODIFIED: Overlap Analysis -- route overlap analysis on buffer + clip
+// Same foundation as the selected-route buffer analysis (computeBufferOverlap), but limited to the participants
+// (the layers shown / ticked in Active Layers); nothing outside them is compared. For every participant b, every
+// other participant a is clipped by the buffer of b; stretches shorter than the minimum corridor length are dropped.
+// Returns the same result structure as computeOverlap, so the table, map, legend and exports keep working.
+function computeOverlapBuffer(participants, params, onProgress){
+    return (async function(){
+        let t0 = performance.now(), n = participants.length, r = params.tol, minLen = params.minLen, warnings = [];
+        function pieceLen(pc){ let l = 0; for(let i = 0; i + 1 < pc.length; i++) l += haversineM(pc[i][1], pc[i][0], pc[i + 1][1], pc[i + 1][0]); return l; }
+        function shapesOf(list){ let o = []; list.forEach(function(p){ p.shapes.forEach(function(sh){ o.push(sh); }); }); return o; }
+
+        let own = participants.map(function(p){
+            let m = 0;
+            p.shapes.forEach(function(sh){ let l = polylineLength(sh).lengthM || 0; if(l > m) m = l; });
+            return m;
+        });
+        let pair = participants.map(function(){ return participants.map(function(){ return 0; }); });
+        let corridors = [], sharedOwn = [], totalShared = 0;
+        let steps = n * 3, done = 0;
+        function tick(){ done++; if(onProgress) onProgress(Math.min(0.99, done / steps)); }
+
+        // pairwise: a clipped by the buffer of b
+        for(let b = 0; b < n; b++){
+            let cands = [];
+            for(let a = 0; a < n; a++) if(a !== b) cands.push({ id: String(a), label: participants[a].label, kind: 'route', routeId: null, shapes: participants[a].shapes });
+            if(cands.length){
+                let res = await computeBufferOverlap({ id: 'p' + b, label: participants[b].label, shapes: participants[b].shapes }, cands, r, minLen, null);
+                if(b === 0 && res.warnings.length) warnings = warnings.concat(res.warnings);
+                res.rows.forEach(function(rw){
+                    let a = +rw.id;
+                    pair[a][b] = rw.overlapM;
+                    if(a < b) rw.bestPieces.forEach(function(pc){      // each pair is reported once, on the lower-index route
+                        corridors.push({ key: a + '-' + b, members: [a, b], lengthM: pieceLen(pc), meanOffsetM: null, confidence: 'high', pts: pc });
+                    });
+                });
+            }
+            tick(); await yieldUI();
+        }
+
+        // shared length of each participant with any other participant (union of the others' buffers)
+        for(let a = 0; a < n; a++){
+            let others = participants.filter(function(p, i){ return i !== a; });
+            let v = 0;
+            if(others.length){
+                let res = await computeBufferOverlap({ id: 'o' + a, label: 'others', shapes: shapesOf(others) },
+                    [{ id: 'x', label: participants[a].label, kind: 'route', routeId: null, shapes: participants[a].shapes }], r, minLen, null);
+                if(res.rows.length) v = res.rows[0].overlapM;
+            }
+            sharedOwn.push(v);
+            tick(); await yieldUI();
+        }
+
+        // unique shared length: each participant clipped by the union of the earlier ones (nothing counted twice)
+        for(let j = 1; j < n; j++){
+            let res = await computeBufferOverlap({ id: 'e' + j, label: 'earlier', shapes: shapesOf(participants.slice(0, j)) },
+                [{ id: 'x', label: participants[j].label, kind: 'route', routeId: null, shapes: participants[j].shapes }], r, minLen, null);
+            if(res.rows.length) totalShared += res.rows[0].overlapM;
+            tick(); await yieldUI();
+        }
+
+        corridors.sort(function(x, y){ return x.key < y.key ? -1 : (x.key > y.key ? 1 : y.lengthM - x.lengthM); });
+        corridors.forEach(function(c, i){ c.id = 'C' + String(i + 1).padStart(3, '0'); });
+        let gm = new Map();
+        corridors.forEach(function(c){
+            let g = gm.get(c.key);
+            if(!g){ g = { key: c.key, members: c.members, count: 0, lengthM: 0, meanOffsetM: null, conf: 'high' }; gm.set(c.key, g); }
+            g.count++; g.lengthM += c.lengthM;
+        });
+        let groups = Array.from(gm.values()).sort(function(x, y){ return y.lengthM - x.lengthM; });
+
+        if(onProgress) onProgress(1);
+        return {
+            params: { tol: r, angleDeg: params.angleDeg, minLen: minLen, unit: params.unit, step: 0 },
+            participants: participants.map(function(p, i){ return { idx: i, id: p.id, label: p.label, color: p.color, ownLengthM: own[i], sharedM: sharedOwn[i] }; }),
+            corridors: corridors, groups: groups, pair: pair, dropped: { count: 0, lengthM: 0 }, totalSharedM: totalShared,
+            pieces: corridors.length, warnings: warnings, elapsedMs: Math.round(performance.now() - t0)
+        };
+    })();
+}
+
+// MODIFIED: Overlap Analysis -- selected-route buffer
+// ---------------------------------------------------------------------------
+//  Buffer analysis (selected route -> all other routes / imported layers)
+//   - The subject geometry and every candidate are projected to a local metric plane
+//     (equirectangular about the centre of the subject's bounding box, metres).
+//   - Buffer = every point within r metres of the subject polyline, i.e. a buffer with
+//     ROUND joins and ROUND caps.  A candidate line intersects that buffer if and only if
+//     its minimum distance to the subject polyline is <= r, so the test is exact and needs
+//     no polygon union.  The part of every candidate segment lying inside the buffer is
+//     computed analytically (segment vs. capsule intervals), which gives exact overlap
+//     lengths and the exact pieces to draw.
+//   - The buffer polygon itself (union of capsules, non-zero fill) is generated for display.
+//  participants: subject = { id, label, shapes:[ [[lon,lat],..], .. ] }
+//                cands   = [ { id, label, kind:'route'|'ext', routeId, shapes:[ [[lon,lat],..], .. ], shapeIds?:[..] } ]
+// ---------------------------------------------------------------------------
+function computeBufferOverlap(subject, cands, r, minLen, onProgress){   // MODIFIED: minLen = minimum continuous overlap (m)
+    return (async function(){
+
+        let t0 = performance.now();
+        let warnings = [];
+
+        // ---- subject bounding box / projection centre ----
+        let minLon = Infinity, maxLon = -Infinity, minLat = Infinity, maxLat = -Infinity;
+        subject.shapes.forEach(function(sh){
+            sh.forEach(function(c){
+                let lon = +c[0], lat = +c[1];
+                if(!isValidLonLat(lon, lat)) return;
+                if(lon < minLon) minLon = lon; if(lon > maxLon) maxLon = lon;
+                if(lat < minLat) minLat = lat; if(lat > maxLat) maxLat = lat;
+            });
+        });
+        if(!isFinite(minLon)) throw new Error("The selected route has no valid geometry.");
+
+        let lon0 = (minLon + maxLon) / 2, lat0 = (minLat + maxLat) / 2;
+        let kx = EARTH_R * DEG * Math.cos(lat0 * DEG), ky = EARTH_R * DEG;
+        let extentKm = haversineM(minLon, minLat, maxLon, maxLat) / 1000;
+        if(extentKm > 150) warnings.push("The selected route spans " + Math.round(extentKm) + " km; the local metric projection becomes less accurate.");
+
+        // ---- subject segments (metres) ----
+        let SX1 = [], SY1 = [], SX2 = [], SY2 = [], SUX = [], SUY = [], SL = [];
+        let subjLines = [];                                   // [lat,lon] for display
+        subject.shapes.forEach(function(sh){
+            let pts = [], ll = [];
+            sh.forEach(function(c){
+                let lon = +c[0], lat = +c[1];
+                if(!isValidLonLat(lon, lat)) return;
+                let x = (lon - lon0) * kx, y = (lat - lat0) * ky;
+                let last = pts[pts.length - 1];
+                if(last && Math.hypot(x - last[0], y - last[1]) < 0.05) return;
+                pts.push([x, y]); ll.push([lat, lon]);
+            });
+            if(pts.length < 2) return;
+            subjLines.push(ll);
+            for(let i = 0; i + 1 < pts.length; i++){
+                let dx = pts[i + 1][0] - pts[i][0], dy = pts[i + 1][1] - pts[i][1], l = Math.hypot(dx, dy);
+                if(l < 1e-6) continue;
+                SX1.push(pts[i][0]); SY1.push(pts[i][1]); SX2.push(pts[i + 1][0]); SY2.push(pts[i + 1][1]);
+                SUX.push(dx / l); SUY.push(dy / l); SL.push(l);
+            }
+        });
+        let NS = SL.length;
+        if(!NS) throw new Error("The selected route has no usable segments.");
+
+        // ---- uniform grid over the subject segments, each segment registered in every cell its r-expanded bbox touches ----
+        const CELL = 150;
+        const KOFF = 1 << 20, KMUL = 1 << 21;
+        function ckey(cx, cy){ return (cx + KOFF) * KMUL + (cy + KOFF); }
+        let grid = new Map();
+        for(let j = 0; j < NS; j++){
+            let x0 = Math.min(SX1[j], SX2[j]) - r, x1 = Math.max(SX1[j], SX2[j]) + r;
+            let y0 = Math.min(SY1[j], SY2[j]) - r, y1 = Math.max(SY1[j], SY2[j]) + r;
+            let cx0 = Math.floor(x0 / CELL), cx1 = Math.floor(x1 / CELL), cy0 = Math.floor(y0 / CELL), cy1 = Math.floor(y1 / CELL);
+            for(let cx = cx0; cx <= cx1; cx++) for(let cy = cy0; cy <= cy1; cy++){
+                let k = ckey(cx, cy), a = grid.get(k);
+                if(a) a.push(j); else grid.set(k, [j]);
+            }
+        }
+        let stamp = new Uint32Array(NS), epoch = 0;
+
+        // interval [lo,hi] (within 0..1) of the candidate segment A + t*D that lies in the capsule of subject segment j
+        function capsuleInterval(ax, ay, dx, dy, j){
+            let lo = Infinity, hi = -Infinity;
+            let a = dx * dx + dy * dy;
+            for(let e = 0; e < 2; e++){
+                let cx = e ? SX2[j] : SX1[j], cy = e ? SY2[j] : SY1[j];
+                let fx = ax - cx, fy = ay - cy, c = fx * fx + fy * fy - r * r;
+                if(a < 1e-12){ if(c <= 0){ if(0 < lo) lo = 0; if(1 > hi) hi = 1; } continue; }
+                let b = 2 * (fx * dx + fy * dy), disc = b * b - 4 * a * c;
+                if(disc < 0) continue;
+                let sq = Math.sqrt(disc), t1 = (-b - sq) / (2 * a), t2 = (-b + sq) / (2 * a);
+                if(t1 < 0) t1 = 0; if(t2 > 1) t2 = 1;
+                if(t1 <= t2){ if(t1 < lo) lo = t1; if(t2 > hi) hi = t2; }
+            }
+            // rectangular body of the capsule: 0 <= s <= L and |w| <= r
+            let ux = SUX[j], uy = SUY[j], nx = -uy, ny = ux;
+            let rx = ax - SX1[j], ry = ay - SY1[j];
+            let s0 = rx * ux + ry * uy, ds = dx * ux + dy * uy, w0 = rx * nx + ry * ny, dw = dx * nx + dy * ny;
+            let t1 = 0, t2 = 1, ok = true;
+            function clip(p0, dp, mn, mx){
+                if(Math.abs(dp) < 1e-12){ if(p0 < mn || p0 > mx) ok = false; return; }
+                let u1 = (mn - p0) / dp, u2 = (mx - p0) / dp;
+                if(u1 > u2){ let tmp = u1; u1 = u2; u2 = tmp; }
+                if(u1 > t1) t1 = u1; if(u2 < t2) t2 = u2;
+            }
+            clip(s0, ds, 0, SL[j]); clip(w0, dw, -r, r);
+            if(ok && t1 <= t2){ if(t1 < lo) lo = t1; if(t2 > hi) hi = t2; }
+            return hi >= lo ? [lo, hi] : null;
+        }
+
+        // ---- analyse one line (array of [lon,lat]); returns null when it does not reach the buffer ----
+        let pad = (r + 2);
+        let bx0 = minLon - pad / kx, bx1 = maxLon + pad / kx, by0 = minLat - pad / ky, by1 = maxLat + pad / ky;
+
+        function analyseLine(coords){
+            // cheap lon/lat bounding-box rejection
+            let inBox = false;
+            for(let i = 0; i < coords.length; i++){
+                let c = coords[i], lon = +c[0], lat = +c[1];
+                if(lon >= bx0 && lon <= bx1 && lat >= by0 && lat <= by1){ inBox = true; break; }
+            }
+            // a long segment can cross the box with both ends outside: test segment bboxes as well
+            if(!inBox){
+                for(let i = 0; i + 1 < coords.length; i++){
+                    let a = coords[i], b = coords[i + 1];
+                    let l0 = Math.min(+a[0], +b[0]), l1 = Math.max(+a[0], +b[0]), p0 = Math.min(+a[1], +b[1]), p1 = Math.max(+a[1], +b[1]);
+                    if(l1 >= bx0 && l0 <= bx1 && p1 >= by0 && p0 <= by1){ inBox = true; break; }
+                }
+            }
+            if(!inBox) return null;
+
+            let pts = [];
+            coords.forEach(function(c){
+                let lon = +c[0], lat = +c[1];
+                if(!isValidLonLat(lon, lat)) return;
+                let x = (lon - lon0) * kx, y = (lat - lat0) * ky, last = pts[pts.length - 1];
+                if(last && Math.hypot(x - last[0], y - last[1]) < 0.05) return;
+                pts.push([x, y]);
+            });
+            if(pts.length < 2) return null;
+
+            let overlapM = 0, hit = false, pieces = [], run = null, prevEndedAtOne = false;
+            function closeRun(){ if(run && run.length >= 2) pieces.push(run); run = null; }
+            function ll(x, y){ return [lat0 + y / ky, lon0 + x / kx]; }
+
+            for(let i = 0; i + 1 < pts.length; i++){
+                let ax = pts[i][0], ay = pts[i][1], dx = pts[i + 1][0] - ax, dy = pts[i + 1][1] - ay;
+                let segLen = Math.hypot(dx, dy);
+                let x0 = Math.min(ax, ax + dx), x1 = Math.max(ax, ax + dx), y0 = Math.min(ay, ay + dy), y1 = Math.max(ay, ay + dy);
+                let cx0 = Math.floor(x0 / CELL), cx1 = Math.floor(x1 / CELL), cy0 = Math.floor(y0 / CELL), cy1 = Math.floor(y1 / CELL);
+                if((cx1 - cx0 + 1) * (cy1 - cy0 + 1) > 40000){ closeRun(); prevEndedAtOne = false; continue; }   // absurdly long segment far away
+                epoch++;
+                let ivs = [];
+                for(let cx = cx0; cx <= cx1; cx++) for(let cy = cy0; cy <= cy1; cy++){
+                    let arr = grid.get(ckey(cx, cy));
+                    if(!arr) continue;
+                    for(let q = 0; q < arr.length; q++){
+                        let j = arr[q];
+                        if(stamp[j] === epoch) continue;
+                        stamp[j] = epoch;
+                        let iv = capsuleInterval(ax, ay, dx, dy, j);
+                        if(iv) ivs.push(iv);
+                    }
+                }
+                if(!ivs.length){ closeRun(); prevEndedAtOne = false; continue; }
+                hit = true;
+                ivs.sort(function(p, q){ return p[0] - q[0]; });
+                let merged = [ivs[0].slice()];
+                for(let m = 1; m < ivs.length; m++){
+                    let lastM = merged[merged.length - 1];
+                    if(ivs[m][0] <= lastM[1] + 1e-9){ if(ivs[m][1] > lastM[1]) lastM[1] = ivs[m][1]; }
+                    else merged.push(ivs[m].slice());
+                }
+                for(let m = 0; m < merged.length; m++){
+                    let t0_ = merged[m][0], t1_ = merged[m][1];
+                    overlapM += (t1_ - t0_) * segLen;
+                    let p0 = ll(ax + t0_ * dx, ay + t0_ * dy), p1 = ll(ax + t1_ * dx, ay + t1_ * dy);
+                    if(run && m === 0 && prevEndedAtOne && t0_ <= 1e-9){ run.push(p1); }
+                    else { closeRun(); run = [p0, p1]; }
+                    if(m < merged.length - 1){ closeRun(); }
+                }
+                prevEndedAtOne = merged[merged.length - 1][1] >= 1 - 1e-9;
+                if(!prevEndedAtOne) closeRun();
+            }
+            closeRun();
+            if(!hit) return null;
+            // MODIFIED: Overlap Analysis -- minimum-length filter. Pieces separated by a short gap (a wiggle that briefly
+            // leaves the buffer) are joined into one run; runs shorter than minLen (corner touches, crossings) are discarded.
+            let BRIDGE = Math.max(30, 2 * r), runs = [];
+            pieces.forEach(function(pc){
+                let len = 0;
+                for(let i = 0; i + 1 < pc.length; i++) len += haversineM(pc[i][1], pc[i][0], pc[i + 1][1], pc[i + 1][0]);
+                let last = runs[runs.length - 1];
+                if(last){
+                    let a = last.pts[last.pts.length - 1], b = pc[0], gap = haversineM(a[1], a[0], b[1], b[0]);
+                    if(gap <= BRIDGE){ last.pts = last.pts.concat(pc); last.len += len; last.span += gap + len; return; }
+                }
+                runs.push({ pts: pc.slice(), len: len, span: len });
+            });
+            runs = runs.filter(function(q){ return q.span >= minLen; });
+            if(!runs.length) return null;
+            let kept = 0;
+            runs.forEach(function(q){ kept += q.len; });
+            return { overlapM: kept, pieces: runs.map(function(q){ return q.pts; }) };
+        }
+
+        // ---- run every candidate ----
+        let rows = [], shapeCache = new Map(), work = 0;
+        for(let ci = 0; ci < cands.length; ci++){
+            let cd = cands[ci];
+            let best = 0, hits = 0, pieces = [], bestPieces = [];   // MODIFIED: bestPieces = pieces of the longest-overlap shape
+            for(let si = 0; si < cd.shapes.length; si++){
+                let sid = cd.shapeIds ? cd.shapeIds[si] : null, res;
+                if(sid !== null && sid !== undefined && shapeCache.has(sid)) res = shapeCache.get(sid);
+                else {
+                    res = analyseLine(cd.shapes[si]);
+                    if(sid !== null && sid !== undefined) shapeCache.set(sid, res);
+                    work += cd.shapes[si].length;
+                }
+                if(res){
+                    hits++;
+                    if(res.overlapM > best){ best = res.overlapM; bestPieces = res.pieces; }
+                    for(let p = 0; p < res.pieces.length; p++) pieces.push(res.pieces[p]);
+                }
+            }
+            if(hits) rows.push({ id: cd.id, label: cd.label, kind: cd.kind, routeId: cd.routeId, overlapM: best, shapesHit: hits, shapesTotal: cd.shapes.length, pieces: pieces, bestPieces: bestPieces });
+            if(work > 150000){ work = 0; if(onProgress) onProgress(ci / cands.length); await yieldUI(); }
+        }
+        rows.sort(function(a, b){ return (b.overlapM - a.overlapM) || String(a.label).localeCompare(String(b.label), undefined, { numeric: true }); });
+
+        // ---- buffer polygon for display: union of capsules (all rings counter-clockwise => non-zero fill) ----
+        let steps = NS > 20000 ? 3 : 8, rings = [];
+        for(let j = 0; j < NS; j++){
+            let th = Math.atan2(SUY[j], SUX[j]), ring = [];
+            let nx = -SUY[j] * r, ny = SUX[j] * r;
+            ring.push(ll2(SX1[j] - nx, SY1[j] - ny)); ring.push(ll2(SX2[j] - nx, SY2[j] - ny));
+            for(let k = 1; k < steps; k++){
+                let a = th - Math.PI / 2 + Math.PI * k / steps;
+                ring.push(ll2(SX2[j] + r * Math.cos(a), SY2[j] + r * Math.sin(a)));
+            }
+            ring.push(ll2(SX2[j] + nx, SY2[j] + ny)); ring.push(ll2(SX1[j] + nx, SY1[j] + ny));
+            for(let k = 1; k < steps; k++){
+                let a = th + Math.PI / 2 + Math.PI * k / steps;
+                ring.push(ll2(SX1[j] + r * Math.cos(a), SY1[j] + r * Math.sin(a)));
+            }
+            rings.push(ring);
+        }
+        function ll2(x, y){ return [lat0 + y / ky, lon0 + x / kx]; }
+
+        if(onProgress) onProgress(1);
+
+        return {
+            r: r, subject: { id: subject.id, label: subject.label, shapes: subject.shapes.length, lines: subjLines },
+            rows: rows, buffer: rings, candidates: cands.length, warnings: warnings,
+            elapsedMs: Math.round(performance.now() - t0)
+        };
+    })();
+}
+
 const Overlap = (function(){
 
     let result = null, busy = false, stale = false, sigLite = '';
+    let buf = null;              // MODIFIED: Overlap Analysis -- selected-route buffer result
 
     function unitVal(){ return $id('ovUnit').value; }
 
@@ -4217,7 +4916,8 @@ const Overlap = (function(){
         setNote(note, 'loading', 'Analysing\u2026 0%');
 
         try {
-            let res = await computeOverlap(parts, params, function(f){
+            // MODIFIED: Overlap Analysis -- buffer + clip, limited to the layers ticked / shown in Active Layers
+            let res = await computeOverlapBuffer(parts, params, function(f){
                 setNote(note, 'loading', 'Analysing\u2026 ' + Math.round(f * 100) + '%');
             });
             res._sig = sig; res.sigLite = currentSig();
@@ -4241,6 +4941,8 @@ const Overlap = (function(){
 
     function draw(){
         overlapLayer.clearLayers();
+        // MODIFIED: Overlap Analysis -- the shared overlay now shows corridors, so a buffer result is dropped
+        if(buf){ buf = null; $id('ovBufResult').innerHTML = ''; setNote($id('ovBufNote'), 'empty', BUF_HINT); }
         if(!result) return;
         result.corridors.forEach(function(c){
             let low = c.confidence === 'low';
@@ -4281,7 +4983,7 @@ const Overlap = (function(){
         h += '<div class="kv"><span>Corridors</span><b>' + r.corridors.length + '</b></div>' +
              '<div class="kv"><span>Unique shared length</span><b>' + fmtKm(r.totalSharedM) + ' km</b></div>' +
              '<div class="kv"><span>Routes involved</span><b>' + sharingRoutes.size + ' of ' + r.participants.length + '</b></div>' +
-             '<div class="kv"><span>Parameters</span><b>' + r.params.tol + ' m \u00b7 ' + r.params.angleDeg + '\u00b0 \u00b7 min ' + r.params.minLen + ' m</b></div>';
+             '<div class="kv"><span>Parameters</span><b>' + r.params.tol + ' m buffer \u00b7 min ' + r.params.minLen + ' m</b></div>';
         if(r.dropped.count) h += '<div class="kv"><span>Ignored short fragments</span><b>' + r.dropped.count + ' (' + fmtKm(r.dropped.lengthM, 3) + ' km)</b></div>';
 
         // per-participant
@@ -4340,6 +5042,10 @@ const Overlap = (function(){
         let box = $id('ovResult'); if(box) box.innerHTML = '';
         if(!silent) setNote($id('ovNote'), 'empty', 'Overlap results cleared.');
         else setNote($id('ovNote'), 'empty', 'Include 2+ routes in the analysis, then press Analyze Overlap.');
+        // MODIFIED: Overlap Analysis -- buffer result is cleared with the shared overlay
+        buf = null;
+        let bb = $id('ovBufResult'); if(bb) bb.innerHTML = '';
+        setNote($id('ovBufNote'), 'empty', BUF_HINT);
         renderLegend();
     }
 
@@ -4349,8 +5055,190 @@ const Overlap = (function(){
         renderLegend();
     }
 
+    // =====================================================================
+    // MODIFIED: Overlap Analysis -- selected-route buffer (UI + drawing; the geometry is computeBufferOverlap)
+    // =====================================================================
+    const BUF_HINT = 'Select a Route (Route & trip selection), then press Analyze Buffer.';
+    const BUF_COLORS = ['#ff9500', '#e6194b', '#3cb44b', '#911eb4', '#00a6a6', '#f032e6', '#9a6324', '#2b4c7e', '#6b8e23', '#d6336c'];
+
+    function bufRead(){
+        let v = parseFloat($id('ovBuf').value);
+        v = Number.isFinite(v) ? Math.min(20, Math.max(10, v)) : 15;
+        $id('ovBuf').value = v;
+        return v;
+    }
+
+    function bufMin(){   // MODIFIED: minimum continuous overlap
+        let v = parseFloat($id('ovBufMin').value);
+        v = Number.isFinite(v) ? Math.min(5000, Math.max(0, v)) : 400;
+        $id('ovBufMin').value = v;
+        return v;
+    }
+
+    // subject = the route chosen in the existing Route / Trip selectors (or an imported layer)
+    function bufSubject(){
+        let src = $id('ovBufSrc').value;
+        if(src){
+            let x = ExtLayers.get(src);
+            if(!x) return { error: 'The chosen imported layer no longer exists.' };
+            if(!x.lines.length) return { error: 'The imported layer "' + x.name + '" has no line or polygon geometry to buffer.' };
+            return { id: x.id, ext: x.id, routeId: null, label: x.name + ' (imported)', color: x.color, shapes: x.lines.slice() };
+        }
+        if(!window.gtfsData) return { error: 'Upload and process a GTFS ZIP first.' };
+        let ix = ensureIdx();
+        let rid = $id('routeSelect').value;
+        if(!rid){
+            let tid = $id('tripSelect').value, f = tid ? ix.featByTrip.get(String(tid)) : null;
+            if(f) rid = String(f.properties.route_id);
+        }
+        if(!rid) return { error: 'Select a Route first (Route & trip selection), then press Analyze Buffer.' };
+        rid = String(rid);
+        let seen = new Set(), shapes = [];
+        window.gtfsData.features.forEach(function(f){
+            if(String(f.properties.route_id) !== rid || !isRegularTrip(f.properties.trip_id)) return;
+            let sid = String(f.properties.shape_id);
+            if(seen.has(sid)) return;
+            seen.add(sid); shapes.push(f.geometry.coordinates);
+        });
+        if(!shapes.length) return { error: 'Route ' + rid + ' has no shape geometry' + (regulerFilterActive ? ' (regular filter is ON).' : '.') };
+        let col = null;
+        registry.forEach(function(e){ if(e.routeId === rid) col = e.color; });
+        return { id: 'route:' + rid, ext: null, routeId: rid, label: 'Route ' + routeLabel(rid), color: col || '#1C418A', shapes: shapes };
+    }
+
+    // candidates = every other GTFS route in the loaded dataset (all its distinct shapes) + ticked imported layers
+    function bufCandidates(sub){
+        let byRoute = new Map();
+        if(window.gtfsData){
+            window.gtfsData.features.forEach(function(f){
+                let rid = String(f.properties.route_id);
+                if(rid === sub.routeId) return;                       // the selected route itself is never a result
+                let sid = String(f.properties.shape_id);
+                let g = byRoute.get(rid);
+                if(!g){ g = { ids: [], shapes: [], seen: new Set() }; byRoute.set(rid, g); }
+                if(g.seen.has(sid)) return;
+                g.seen.add(sid); g.ids.push(sid); g.shapes.push(f.geometry.coordinates);
+            });
+        }
+        let out = [];
+        byRoute.forEach(function(g, rid){
+            out.push({ id: 'route:' + rid, label: 'Route ' + routeLabel(rid), kind: 'route', routeId: rid, shapes: g.shapes, shapeIds: g.ids });
+        });
+        ExtLayers.entries().forEach(function(x){
+            if(x.id === sub.ext || !x.compare || !x.lines.length) return;
+            out.push({ id: x.id, label: x.name + ' (imported)', kind: 'ext', routeId: null, shapes: x.lines });
+        });
+        return out;
+    }
+
+    async function runBuffer(){
+
+        if(busy) return;
+        let note = $id('ovBufNote');
+        let r = bufRead();
+        let sub = bufSubject();
+        if(sub.error){ setNote(note, 'warn', sub.error); return; }
+        let cands = bufCandidates(sub);
+        if(!cands.length){ setNote(note, 'warn', 'There are no other routes or imported layers to compare against.'); return; }
+
+        busy = true;
+        $id('ovBufRun').disabled = true; $id('ovRun').disabled = true;
+        setNote(note, 'loading', 'Analysing buffer\u2026 0%');
+
+        try {
+            let minLen = bufMin();
+            let res = await computeBufferOverlap(sub, cands, r, minLen, function(f){
+                setNote(note, 'loading', 'Analysing buffer\u2026 ' + Math.round(f * 100) + '%');
+            });
+            res.subject.color = sub.color; res.subject.ext = sub.ext; res.subject.routeId = sub.routeId;
+            res.minLen = minLen;
+            res.candIds = new Set(cands.map(function(c){ return c.id; }));
+            res.compared = { routes: cands.filter(function(c){ return c.kind === 'route'; }).length,
+                             ext: cands.filter(function(c){ return c.kind === 'ext'; }).length };
+
+            // the overlay is shared with the corridor analysis: show the buffer result only
+            result = null; stale = false; $id('ovResult').innerHTML = '';
+            setNote($id('ovNote'), 'empty', 'Include 2+ routes in the analysis, then press Analyze Overlap.');
+            buf = res;
+            drawBuffer(); renderBuffer();
+
+            let nR = res.rows.filter(function(x){ return x.kind === 'route'; }).length, nE = res.rows.length - nR;
+            let msg = nR + ' existing route(s)' + (res.compared.ext ? ' and ' + nE + ' imported layer(s)' : '') + ' overlap the ' + r + ' m buffer by \u2265 ' + minLen + ' m \u2013 ' + res.elapsedMs + ' ms.';
+            setNote(note, res.warnings.length ? 'warn' : (res.rows.length ? 'ok' : 'warn'),
+                    (res.rows.length ? msg : 'No other route overlaps the ' + r + ' m buffer for at least ' + minLen + ' m.') + (res.warnings.length ? ' ' + res.warnings.join(' ') : ''));
+        } catch(err){
+            console.error(err);
+            setNote(note, 'error', 'Buffer analysis failed: ' + err.message);
+        } finally {
+            busy = false; $id('ovBufRun').disabled = false; $id('ovRun').disabled = false;
+        }
+    }
+
+    function drawBuffer(){
+        overlapLayer.clearLayers();
+        if(!buf) return;
+        let col = buf.subject.color;
+        // buffer polygon: union of capsules with round joins/caps (non-zero fill so overlaps do not punch holes)
+        L.polygon(buf.buffer, { pane: 'overlapPane', stroke: false, fillColor: col, fillOpacity: 0.22, fillRule: 'nonzero', interactive: false }).addTo(overlapLayer);
+        buf.rows.forEach(function(rw, i){
+            rw.color = BUF_COLORS[i % BUF_COLORS.length];
+            L.polyline(rw.pieces, { pane: 'overlapPane', color: rw.color, weight: 6, opacity: 0.9, lineCap: 'round', interactive: false }).addTo(overlapLayer);
+        });
+        buf.subject.lines.forEach(function(l){
+            L.polyline(l, { pane: 'overlapPane', color: col, weight: 3, opacity: 1, interactive: false }).addTo(overlapLayer);
+        });
+        let sw = $id('ovShow');
+        sw.checked = true; sw.disabled = false;
+        if(!map.hasLayer(overlapLayer)) overlapLayer.addTo(map);
+        renderLegend();
+    }
+
+    function renderBuffer(){
+        let box = $id('ovBufResult');
+        if(!buf){ box.innerHTML = ''; return; }
+        let b = buf;
+        let h = '<div class="kv"><span>Selected</span><b>' + esc(b.subject.label) + '</b></div>' +
+                '<div class="kv"><span>Buffer</span><b>' + b.r + ' m (round joins &amp; caps)</b></div>' +
+                '<div class="kv"><span>Routes compared</span><b>' + b.compared.routes + (b.compared.ext ? ' + ' + b.compared.ext + ' imported' : '') + '</b></div>' +
+                '<div class="kv"><span>Overlapping (\u2265 ' + (b.minLen) + ' m)</span><b>' + b.rows.length + '</b></div>';
+        if(b.rows.length){
+            h += '<div class="table-wrap"><table class="mini-table"><thead><tr><th>Route / layer <span class="muted">(click to zoom)</span></th><th class="num">Overlap km</th><th class="num">Shapes</th></tr></thead><tbody>';
+            b.rows.slice(0, 300).forEach(function(rw){
+                h += '<tr class="clickable" data-bkey="' + esc(rw.id) + '"><td><span class="li-sw" style="background:' + rw.color + '"></span> ' + esc(rw.label) + '</td>' +
+                     '<td class="num">' + fmtKm(rw.overlapM, 3) + '</td><td class="num">' + rw.shapesHit + '/' + rw.shapesTotal + '</td></tr>';
+            });
+            h += '</tbody></table></div>';
+            if(b.rows.length > 300) h += '<div class="muted sm">Showing the 300 longest of ' + b.rows.length + ' results.</div>';
+        }
+        box.innerHTML = h;
+    }
+
+    function zoomBuffer(id){
+        if(!buf) return;
+        let rw = buf.rows.find(function(x){ return x.id === id; });
+        if(!rw) return;
+        let pts = [];
+        rw.pieces.forEach(function(p){ p.forEach(function(q){ pts.push(q); }); });
+        let bd = pts.length ? L.latLngBounds(pts) : null;
+        if(bd && bd.isValid()) fitWithSidebar(bd);
+    }
+
+    function clearBuffer(){
+        if(!buf){ setNote($id('ovBufNote'), 'empty', BUF_HINT); return; }
+        clear(true);
+        setNote($id('ovBufNote'), 'empty', 'Buffer results cleared.');
+    }
+
+    // an imported layer used by the current buffer result was removed -> the result is no longer valid
+    function dropExt(id){
+        if(buf && (buf.subject.ext === id || buf.candIds.has(id))) clear(true);
+    }
+
     return {
         run: run, clear: clear, setShown: setShown, markStale: markStale, zoomGroup: zoomGroup,
+        runBuffer: runBuffer, clearBuffer: clearBuffer, zoomBuffer: zoomBuffer, dropExt: dropExt,
+        hasBufferResult: function(){ return !!buf && map.hasLayer(overlapLayer); },
+        bufferMeters: function(){ return buf ? buf.r : 0; },
         getResult: function(){ return result; },
         isStale: function(){ return stale; },
         hasVisibleResult: function(){ return !!result && map.hasLayer(overlapLayer); },
@@ -4747,7 +5635,7 @@ const Exporter = (function(){
                 ["shape_dist_traveled span", "Raw feed value (last - first). Unit is defined by the feed and is not converted."],
                 ["Route-level length", "Median of the distinct shape lengths among the route's trips; min/max are given separately."],
                 ["Comparison set", "Layers whose 'include' checkbox is ticked."],
-                ["Overlap method", cor ? ("Segment matching, tolerance " + Overlap.getResult().params.tol + " m, angle " + Overlap.getResult().params.angleDeg + " deg, min corridor " + Overlap.getResult().params.minLen + " m, unit = " + Overlap.getResult().params.unit + ". Heuristic geometry matching; parallel roads closer than the tolerance may be merged; confidence labels are heuristics.") : "Not run \u2013 corridor sheets omitted."],
+                ["Overlap method", cor ? ("Buffer + clip of the ticked layers only, buffer " + Overlap.getResult().params.tol + " m, min corridor " + Overlap.getResult().params.minLen + " m, unit = " + Overlap.getResult().params.unit + ". Pairwise geometry clipping; parallel roads closer than the buffer may be merged; overlap is reported once per pair of routes.") : "Not run \u2013 corridor sheets omitted."],
                 ["Overlap up to date", cor ? (Overlap.isStale() ? "NO \u2013 layers changed since analysis" : "yes") : "n/a"],
                 [""],
                 ["Feed check: trips without usable shape", q.tripsNoShape === undefined ? "n/a" : q.tripsNoShape],
@@ -4802,6 +5690,8 @@ $id('layerList').addEventListener('click', function(ev){
     let btn = ev.target.closest('button[data-act]');
     let item = ev.target.closest('.layer-item');
     if(!btn || !item) return;
+    // MODIFIED: External Layers -- imported layers use their own registry
+    if(item.hasAttribute('data-ext')){ ExtLayers.action(item.getAttribute('data-ext'), btn.getAttribute('data-act')); return; }
     let key = item.getAttribute('data-key'), e = registry.get(key);
     if(!e) return;
     switch(btn.getAttribute('data-act')){
@@ -4812,36 +5702,47 @@ $id('layerList').addEventListener('click', function(ev){
     }
 });
 $id('layerList').addEventListener('change', function(ev){
+    // MODIFIED: Active-Layer colour -- on commit (Enter / blur) an invalid HEX value snaps back to the current colour
+    if(ev.target.classList.contains('li-hex')){
+        let it = ev.target.closest('.layer-item'); if(!it) return;
+        let cur = null;
+        if(it.hasAttribute('data-ext')){ let xx = ExtLayers.get(it.getAttribute('data-ext')); cur = xx && xx.color; }
+        else { let ee = registry.get(it.getAttribute('data-key')); cur = ee && ee.color; }
+        let hx = hexParse(ev.target.value);
+        ev.target.value = String(hx || cur || '').toUpperCase();
+        ev.target.classList.remove('invalid');
+        return;
+    }
     if(!ev.target.classList.contains('li-cmp')) return;
     let item = ev.target.closest('.layer-item'); if(!item) return;
+    // MODIFIED: External Layers
+    if(item.hasAttribute('data-ext')){ ExtLayers.setCompare(item.getAttribute('data-ext'), ev.target.checked); return; }
     let e = registry.get(item.getAttribute('data-key')); if(!e) return;
     e.compare = ev.target.checked;
     changed(true);
 });
 
+// MODIFIED: Active-Layer colour -- native picker + HEX field, both update the layer immediately.
+// Nothing here re-renders the list, so the native colour picker keeps working with click / hold / drag.
 $id('layerList').addEventListener('input', function(ev){
-    if(!ev.target.classList.contains('li-color')) return;
-    if(colorMode !== 'custom') return;
+    let t = ev.target, isPick = t.classList.contains('li-color'), isHex = t.classList.contains('li-hex');
+    if(!isPick && !isHex) return;
 
-    let item = ev.target.closest('.layer-item');
+    let item = t.closest('.layer-item');
     if(!item) return;
 
+    let hex = hexParse(t.value);                        // picker values are always #rrggbb; typed HEX may be #abc / abc / #aabbcc
+    if(isHex) t.classList.toggle('invalid', !hex);
+    if(!hex) return;                                   // invalid HEX never reaches the map
+
+    if(item.hasAttribute('data-ext')){ ExtLayers.setColor(item.getAttribute('data-ext'), hex, item); return; }
+
+    if(colorMode !== 'custom') return;
     let e = registry.get(item.getAttribute('data-key'));
     if(!e) return;
-
-    e.customColor = ev.target.value;
-    e.color = e.customColor;
-
-    // Update the actual Leaflet route layer
-    e.layer.setStyle({
-        color: e.color
-    });
-
-    // Refresh layer list, map legend and analysis swatches
-    changed(true);
-    Overlap.refreshSwatches();
+    applyEntryColor(e, hex, item);
 });
-    
+
 $id('colorMode').addEventListener('change', function(){ setColorMode(this.value); });
 
 $id('addRouteBtn').addEventListener('click', function(){
@@ -4862,6 +5763,13 @@ Tabs.onShow('foldCompare', function(){ Compare.render(); });
 
 $id('ovRun').addEventListener('click', function(){ Overlap.run(); });
 $id('ovClear').addEventListener('click', function(){ Overlap.clear(false); });
+// MODIFIED: Overlap Analysis -- selected-route buffer
+$id('ovBufRun').addEventListener('click', function(){ Overlap.runBuffer(); });
+$id('ovBufClear').addEventListener('click', function(){ Overlap.clearBuffer(); });
+$id('ovBufResult').addEventListener('click', function(ev){
+    let tr = ev.target.closest('tr[data-bkey]');
+    if(tr) Overlap.zoomBuffer(tr.getAttribute('data-bkey'));
+});
 $id('ovShow').addEventListener('change', function(){ Overlap.setShown(this.checked); });
 $id('ovUnit').addEventListener('change', function(){ Overlap.markStale(); });
 $id('ovResult').addEventListener('click', function(ev){
