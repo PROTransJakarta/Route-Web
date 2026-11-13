@@ -342,6 +342,8 @@ select.ctl{ appearance:auto; }
 .li-hex{ width:84px; height:22px; margin-top:3px; padding:0 6px; border:1px solid var(--border); border-radius:6px; background:var(--card); color:var(--text); font-family:ui-monospace,Consolas,monospace; font-size:11px; text-transform:uppercase; outline:none; }
 .li-hex:focus{ border-color:var(--c-accent); box-shadow:0 0 0 2px rgba(41,116,176,.25); }
 .li-hex.invalid{ border-color:var(--err); box-shadow:0 0 0 2px var(--err-soft); }
+.li-ls{ height:22px; margin:3px 0 0 4px; padding:0 4px; border:1px solid var(--border); border-radius:6px; background:var(--card); color:var(--text); font-size:11px; outline:none; }
+.li-ls:focus{ border-color:var(--c-accent); box-shadow:0 0 0 2px rgba(41,116,176,.25); }
 .layer-item.is-ext .li-sub::before{ content:"Imported \00b7 "; font-weight:700; }
 /* MODIFIED: Remove black outline around clicked routes (browser focus ring drawn on the clicked SVG path) */
 .leaflet-container .leaflet-interactive:focus,
@@ -440,7 +442,7 @@ select.ctl{ appearance:auto; }
 .png-meta b{ font-size:14px; }
 
 /* ---------- MAP CONTROLS ---------- */
-.leaflet-top.leaflet-right{ margin-top:76px; }
+.leaflet-top.leaflet-right{ margin-top:76px; z-index:1001; }   /* MODIFIED: basemap selector always above the legend */
 .leaflet-top.leaflet-right .leaflet-control-layers{ margin-right:10px; border:none; border-radius:10px; background:var(--map-ctl-bg); box-shadow:var(--shadow); color:var(--text); }
 .leaflet-control-layers-expanded{ border-radius:12px !important; padding:10px 14px !important; font-family:inherit; font-size:13px; }
 .leaflet-control-layers-toggle{ width:42px; height:42px; border-radius:10px; }
@@ -458,7 +460,7 @@ select.ctl{ appearance:auto; }
 .leaflet-control-attribution{ background:rgba(255,255,255,.85) !important; border-radius:8px 0 0 0; color:#444 !important; }
 
 /* ---------- LEGEND + TOAST ---------- */
-#mapLegend{ position:fixed; top:140px; right:10px; z-index:1000; width:210px; max-height:42vh; overflow:hidden; border-radius:12px; padding:10px 12px; font-size:12px; background:var(--card); color:var(--text); box-shadow:var(--shadow); border-top:3px solid var(--c-yellow); }
+#mapLegend{ position:fixed; top:244px; right:10px; z-index:1000; width:210px; max-height:42vh; overflow:hidden; border-radius:12px; padding:10px 12px; font-size:12px; background:var(--card); color:var(--text); box-shadow:var(--shadow); border-top:3px solid var(--c-yellow); }
 #mapLegend[hidden]{ display:none; }
 #lgHead{ display:flex; justify-content:space-between; align-items:center; cursor:pointer; font-weight:800; font-size:12px; color:var(--text); }
 #lgHead .chev{ width:7px; height:7px; border:solid var(--text2); border-width:0 2px 2px 0; transform:rotate(45deg); transition:transform .2s; }
@@ -2496,6 +2498,22 @@ document
 
     }, 500);
 
+    // MODIFIED: Export -- visible imported layers are exported too (one GeoJSON per layer, with style properties)
+    ExtLayers.entries().filter(function(x){ return x.visible; }).forEach(function(x, n){
+        setTimeout(function(){
+            let fc = {
+                type: "FeatureCollection",
+                features: x.fc.features.map(function(f){
+                    return { type: "Feature", geometry: f.geometry, properties: Object.assign({}, f.properties, {
+                        stroke: x.color, "stroke-width": Math.round((x.lineStyle === 'solid' ? 4 : window.LS_W) * 100) / 100, "stroke-opacity": 0.95,
+                        line_style: x.lineStyle || "solid"
+                    }) };
+                })
+            };
+            downloadGeoJSON(fc, "Imported_" + String(x.name).replace(/[^a-zA-Z0-9_-]/g, "_") + ".geojson");
+        }, 1000 + n * 500);
+    });
+
 });
 
 // =========================
@@ -2522,6 +2540,37 @@ function hexToKmlColor(hex, alpha){
     let g = hex.substring(2,4);
     let b = hex.substring(4,6);
     return alpha + b + g + r;
+}
+
+// MODIFIED: Export -- imported layers (visible ones) as KML folders
+function extKmlFolders(){
+    let out = "";
+    ExtLayers.entries().forEach(function(x){
+        if(!x.visible) return;
+        let col = hexToKmlColor(x.color, "ff"), w = Math.max(1, Math.round(x.lineStyle === 'solid' ? 4 : window.LS_W));
+        function coords(a){ return a.map(function(c){ return c[0] + "," + c[1] + ",0"; }).join(" "); }
+        function geom(g){
+            switch(g.type){
+                case "Point": return "<Point><coordinates>" + g.coordinates[0] + "," + g.coordinates[1] + ",0</coordinates></Point>";
+                case "MultiPoint": return "<MultiGeometry>" + g.coordinates.map(function(c){ return geom({ type: "Point", coordinates: c }); }).join("") + "</MultiGeometry>";
+                case "LineString": return "<LineString><tessellate>1</tessellate><coordinates>" + coords(g.coordinates) + "</coordinates></LineString>";
+                case "MultiLineString": return "<MultiGeometry>" + g.coordinates.map(function(c){ return geom({ type: "LineString", coordinates: c }); }).join("") + "</MultiGeometry>";
+                case "Polygon": return "<Polygon>" + g.coordinates.map(function(r, i){ return (i ? "<innerBoundaryIs>" : "<outerBoundaryIs>") + "<LinearRing><coordinates>" + coords(r) + "</coordinates></LinearRing>" + (i ? "</innerBoundaryIs>" : "</outerBoundaryIs>"); }).join("") + "</Polygon>";
+                case "MultiPolygon": return "<MultiGeometry>" + g.coordinates.map(function(c){ return geom({ type: "Polygon", coordinates: c }); }).join("") + "</MultiGeometry>";
+                case "GeometryCollection": return "<MultiGeometry>" + g.geometries.map(geom).join("") + "</MultiGeometry>";
+            }
+            return "";
+        }
+        out += "\n<Folder><name>" + escapeXml(x.name) + " (imported)</name>";
+        x.fc.features.forEach(function(f, i){
+            let p = f.properties || {}, nm = p.name || p.Name || p.NAME || p.stop_name || p.nama || (x.name + " " + (i + 1));
+            out += "\n<Placemark><name>" + escapeXml(nm) + "</name>" +
+                   "<Style><LineStyle><color>" + col + "</color><width>" + w + "</width></LineStyle>" +
+                   "<PolyStyle><color>" + hexToKmlColor(x.color, "33") + "</color></PolyStyle></Style>" + geom(f.geometry) + "</Placemark>";
+        });
+        out += "\n</Folder>";
+    });
+    return out;
 }
 
 function buildTripKML(routeFeatures, stopFeatures, tripId){
@@ -2572,7 +2621,7 @@ function buildTripKML(routeFeatures, stopFeatures, tripId){
         '<kml xmlns="http://www.opengis.net/kml/2.2">\n' +
         "<Document>\n" +
         "<name>Trip " + escapeXml(tripId) + "</name>" +
-        placemarks +
+        placemarks + extKmlFolders() +
         "\n</Document>\n</kml>"
     );
 
@@ -3376,7 +3425,7 @@ function buildLineLayer(entry, features){
 
     return L.geoJSON(features, {
 
-        style: function(){ return { color: entry.color, weight: 6, opacity: 1 }; },
+        style: function(){ return Object.assign({ color: entry.color, weight: 6, opacity: 1 }, lineStyleOpts(entry.lineStyle, 6)); },   // MODIFIED: Line style
 
         onEachFeature: function(feature, layer){
 
@@ -3395,11 +3444,11 @@ function buildLineLayer(entry, features){
 
             layer.on("mouseover", function(){
                 // MODIFIED: Black outline -- hover keeps the layer colour (was forced to #000000 for route groups)
-                this.setStyle({ weight: 10 });
+                this.setStyle({ weight: lineWeights(entry.lineStyle, 6).hover });
                 this.bringToFront();
             });
             layer.on("mouseout", function(){
-                this.setStyle({ weight: 6, color: entry.color });
+                this.setStyle({ weight: lineWeights(entry.lineStyle, 6).base, color: entry.color });
             });
         }
     });
@@ -3658,6 +3707,25 @@ function setAllStops(on){
 // MODIFIED: Active-Layer colour -- HEX parsing + in-place update.
 // The list is deliberately NOT re-rendered while a colour is being chosen: re-rendering replaced the <input type="color">
 // on every 'input' event, which closed the native picker and broke click / hold / drag.
+// MODIFIED: Line style (solid / dashed / dotted) of an active layer.
+// Dashed and dotted lines are drawn 0.66 mm thick with a 2 mm space (1 mm = 96/25.4 px); dashes are 3 mm long, dots are round.
+const MM_PX = 96 / 25.4, LS_W = 0.66 * MM_PX;
+window.LS_W = LS_W;   // also used by the export code that lives outside this scope
+function lineStyleOpts(v, solidW){
+    if(v === 'dashed') return { weight: LS_W, dashArray: (3 * MM_PX).toFixed(2) + ' ' + (2 * MM_PX).toFixed(2), lineCap: 'butt' };
+    if(v === 'dotted') return { weight: LS_W, dashArray: '0.01 ' + ((2 + 0.66) * MM_PX).toFixed(2), lineCap: 'round' };
+    return { weight: solidW, dashArray: null, lineCap: 'round' };
+}
+function lineWeights(v, solidW){
+    return (v === 'dashed' || v === 'dotted') ? { base: LS_W, hover: LS_W * 2 } : { base: solidW, hover: 10 };
+}
+function lineStyleSelect(v){
+    v = (v === 'dashed' || v === 'dotted') ? v : 'solid';
+    return '<select class="li-ls" title="Line style" aria-label="Line style">' +
+        ['solid', 'dashed', 'dotted'].map(function(o){ return '<option value="' + o + '"' + (o === v ? ' selected' : '') + '>' + o.charAt(0).toUpperCase() + o.slice(1) + '</option>'; }).join('') +
+        '</select>';
+}
+
 function hexParse(str){
     let h = String(str || '').trim().replace(/^#/, '');
     if(/^[0-9a-fA-F]{3}$/.test(h)) h = h.replace(/./g, function(c){ return c + c; });
@@ -3766,6 +3834,7 @@ function renderLayerPanel(){
             '<div class="li-sub">' + sub + '</div>' +
             // MODIFIED: Active-Layer colour -- HEX field (custom colour mode only)
             (colorMode === 'custom' ? '<input type="text" class="li-hex" value="' + String(e.color).toUpperCase() + '" maxlength="7" spellcheck="false" placeholder="#RRGGBB" title="HEX colour, e.g. #1C418A" aria-label="HEX colour">' : '') +
+            lineStyleSelect(e.lineStyle) +   // MODIFIED: Line style
             '</div>' +
             '<div class="li-act">' +
                 '<button data-act="vis" title="' + (e.visible ? 'Hide layer' : 'Show layer') + '">' + (e.visible ? ICON.eye : ICON.eyeOff) + '</button>' +
@@ -3783,7 +3852,7 @@ function renderLayerPanel(){
             '<input type="color" class="li-color" value="' + x.color + '" title="Choose layer colour">' +
             '<div class="li-txt"><div class="li-title" title="' + esc(x.name) + '">' + esc(x.name) + '</div>' +
             '<div class="li-sub">' + x.nFeat + ' feature' + (x.nFeat === 1 ? '' : 's') + '</div>' +
-            '<input type="text" class="li-hex" value="' + x.color.toUpperCase() + '" maxlength="7" spellcheck="false" placeholder="#RRGGBB" title="HEX colour, e.g. #1C418A" aria-label="HEX colour"></div>' +
+            '<input type="text" class="li-hex" value="' + x.color.toUpperCase() + '" maxlength="7" spellcheck="false" placeholder="#RRGGBB" title="HEX colour, e.g. #1C418A" aria-label="HEX colour">' + lineStyleSelect(x.lineStyle) + '</div>' +
             '<div class="li-act">' +
                 '<button data-act="vis" title="' + (x.visible ? 'Hide layer' : 'Show layer') + '">' + (x.visible ? ICON.eye : ICON.eyeOff) + '</button>' +
                 '<button data-act="zoom" title="Zoom to layer">' + ICON.zoom + '</button>' +
@@ -3975,8 +4044,8 @@ const ExtLayers = (function(){
         return function(f){
             let t = f && f.geometry ? f.geometry.type : '';
             if(/Point/.test(t)) return { color: x.color, weight: 2, fillColor: '#ffffff', fillOpacity: 0.9 };
-            if(/Polygon/.test(t)) return { color: x.color, weight: 3, opacity: 0.95, fillColor: x.color, fillOpacity: 0.12 };
-            return { color: x.color, weight: 4, opacity: 0.95, dashArray: '10 6' };
+            if(/Polygon/.test(t)) return Object.assign({ color: x.color, opacity: 0.95, fillColor: x.color, fillOpacity: 0.12 }, lineStyleOpts(x.lineStyle, 3));
+            return Object.assign({ color: x.color, opacity: 0.95 }, lineStyleOpts(x.lineStyle, 4));   // MODIFIED: solid by default
         };
     }
 
@@ -3989,6 +4058,23 @@ const ExtLayers = (function(){
         });
         return '<div style="font-size:12px;line-height:1.5;max-width:280px"><b>' + esc(x.name) + '</b>' +
                (rows.length ? '<table style="margin-top:4px;border-collapse:collapse">' + rows.join('') + '</table>' : '') + '</div>';
+    }
+
+    // MODIFIED: map common attribute names of imported points to the GTFS stop fields used by buildStopPopup
+    function stopProps(p, autoSeq, x){
+        let low = {};
+        Object.keys(p || {}).forEach(function(k){ low[k.toLowerCase()] = p[k]; });
+        function pick(keys){
+            for(let i = 0; i < keys.length; i++){ let v = low[keys[i]]; if(v !== undefined && v !== null && v !== '' && typeof v !== 'object') return String(v); }
+            return '';
+        }
+        return {
+            stop_name: pick(['stop_name', 'name', 'nama', 'nama_halte', 'halte', 'title', 'label']) || x.name,
+            stop_id: pick(['stop_id', 'id', 'kode', 'code', 'objectid', 'fid']),
+            stop_sequence: pick(['stop_sequence', 'sequence', 'seq', 'urutan', 'no', 'nomor', 'order']) || String(autoSeq || ''),
+            trip_id: pick(['trip_id']),
+            stop_headsign: pick(['stop_headsign', 'headsign'])
+        };
     }
 
     function entries(){ return Array.from(items.values()); }
@@ -4005,15 +4091,28 @@ const ExtLayers = (function(){
 
     function add(name, fc){
         assertWGS84(fc);
-        let x = { id: 'ext:' + (++seq), name: name, color: PALETTE[seq % PALETTE.length], visible: true, compare: true,
+        let x = { id: 'ext:' + (++seq), name: name, color: PALETTE[seq % PALETTE.length], visible: true, compare: true, lineStyle: 'solid',
                   fc: fc, lines: linesOf(fc), nFeat: fc.features.length, layer: null };
         x.styleFn = styleOf(x);
+        let ptSeq = new Map(), pi = 0;
+        fc.features.forEach(function(f){ if(f.geometry && f.geometry.type === 'Point') ptSeq.set(f, ++pi); });
         x.layer = L.geoJSON(fc, {
             style: x.styleFn,
-            pointToLayer: function(f, ll){ return L.circleMarker(ll, { radius: 5 }); },
+            // MODIFIED: imported points are drawn like GTFS stops (halte.png icon, "seq. name" label, stop detail popup)
+            pointToLayer: function(f, ll){ return L.marker(ll, { icon: halteIcon }); },
             onEachFeature: function(f, layer){
-                layer.bindPopup(function(){ return popupHtml(x, f.properties); }, { maxWidth: 300 });
-                let p = f.properties || {}, nm = p.name || p.Name || p.NAME;
+                let p = f.properties || {};
+                if(f.geometry && f.geometry.type === 'Point'){
+                    let sp = stopProps(p, ptSeq.get(f), x);
+                    layer.bindTooltip('<b>' + esc(sp.stop_sequence) + '. ' + esc(sp.stop_name) + '</b>',
+                        { direction: 'top', offset: [0, -14], className: 'halte-label' });
+                    layer.bindPopup(function(){ return buildStopPopup(sp, layer.getLatLng()); }, { maxWidth: 320, className: 'stop-detail-popup' });
+                    layer.on('mouseover', function(){ this.setIcon(halteIconHover); });
+                    layer.on('mouseout', function(){ this.setIcon(halteIcon); });
+                    return;
+                }
+                layer.bindPopup(function(){ return popupHtml(x, p); }, { maxWidth: 300 });
+                let nm = p.name || p.Name || p.NAME;
                 if(nm) layer.bindTooltip(esc(String(nm)), { sticky: true });
             }
         });
@@ -4056,6 +4155,7 @@ const ExtLayers = (function(){
         else if(act === 'zoom') zoom(id);
         else if(act === 'rm') remove(id);
     }
+    function setLineStyle(id, v){ let x = items.get(id); if(!x) return; x.lineStyle = v; x.layer.setStyle(x.styleFn); }
     function setCompare(id, v){ let x = items.get(id); if(x) x.compare = !!v; }
 
     async function importFiles(files){
@@ -4119,8 +4219,9 @@ const ExtLayers = (function(){
         importFiles(files);
     });
 
-    return { entries: entries, get: get, setColor: setColor, setCompare: setCompare, action: action };
+    return { group: group, entries: entries, get: get, setColor: setColor, setCompare: setCompare, setLineStyle: setLineStyle, action: action };
 })();
+window.ExtLayers = ExtLayers;   // MODIFIED: Export -- read by the PNG / KML / GeoJSON export code
 
 // ---------------------------------------------------------------
 // 6. ROUTE COMPARISON  (table + warnings; legend is the map legend above)
@@ -5702,6 +5803,16 @@ $id('layerList').addEventListener('click', function(ev){
     }
 });
 $id('layerList').addEventListener('change', function(ev){
+    // MODIFIED: Line style -- applied in place (no list re-render)
+    if(ev.target.classList.contains('li-ls')){
+        let it = ev.target.closest('.layer-item'); if(!it) return;
+        let v = ev.target.value;
+        if(it.hasAttribute('data-ext')){ ExtLayers.setLineStyle(it.getAttribute('data-ext'), v); return; }
+        let ee = registry.get(it.getAttribute('data-key')); if(!ee) return;
+        ee.lineStyle = v;
+        ee.layer.setStyle(lineStyleOpts(v, 6));
+        return;
+    }
     // MODIFIED: Active-Layer colour -- on commit (Enter / blur) an invalid HEX value snaps back to the current colour
     if(ev.target.classList.contains('li-hex')){
         let it = ev.target.closest('.layer-item'); if(!it) return;
@@ -7679,6 +7790,10 @@ async function exportMapAsPng(){
         // ---- 2. route lines + overlap corridors (visible layers only) ----
         ctx.lineJoin = "round";
         ctx.lineCap = "round";
+        // MODIFIED: Export -- dashed / dotted lines are exported exactly as drawn on the map (pattern scales with the output)
+        const dashOf = function(o){
+            return o.dashArray ? String(o.dashArray).split(/[\s,]+/).map(Number).filter(function(n){ return isFinite(n); }).map(function(n){ return n * k; }) : [];
+        };
 
         eachLeaf({ eachLayer: function(fn){
             selectedRouteLayer.eachLayer(fn);
@@ -7695,15 +7810,48 @@ async function exportMapAsPng(){
                 ctx.globalAlpha = (o.opacity !== undefined ? o.opacity : 1);
                 ctx.strokeStyle = o.color || "#3388ff";
                 ctx.lineWidth = (o.weight || 3) * k;
+                ctx.setLineDash(dashOf(o));
+                ctx.lineCap = o.lineCap || "round";
                 ctx.stroke();
             });
         });
+        ctx.setLineDash([]); ctx.lineCap = "round";
+        ctx.globalAlpha = 1;
+
+        // MODIFIED: Export -- imported layers (KML / GeoJSON / SHP): lines with their dash style, polygons filled
+        eachLeaf(ExtLayers.group, function(l){
+            if(!(l instanceof L.Polyline)) return;            // L.Polygon extends L.Polyline
+            const o = l.options, isPoly = l instanceof L.Polygon;
+            ctx.beginPath();
+            flattenLatLngs(l.getLatLngs(), []).forEach(function(ring){
+                ring.forEach(function(ll, i){
+                    const p = toCanvas(ll);
+                    if(i === 0) ctx.moveTo(p.x, p.y); else ctx.lineTo(p.x, p.y);
+                });
+                if(isPoly) ctx.closePath();
+            });
+            if(isPoly && o.fill !== false){
+                ctx.globalAlpha = (o.fillOpacity !== undefined ? o.fillOpacity : 0.2);
+                ctx.fillStyle = o.fillColor || o.color || "#3388ff";
+                ctx.fill("evenodd");
+            }
+            if(o.stroke !== false){
+                ctx.globalAlpha = (o.opacity !== undefined ? o.opacity : 1);
+                ctx.strokeStyle = o.color || "#3388ff";
+                ctx.lineWidth = (o.weight || 3) * k;
+                ctx.setLineDash(dashOf(o));
+                ctx.lineCap = o.lineCap || "round";
+                ctx.stroke();
+            }
+        });
+        ctx.setLineDash([]); ctx.lineCap = "round";
         ctx.globalAlpha = 1;
         btn.textContent = "Rendering\u2026 88%";
 
         // ---- 3. visible stops ----
         const iconCache = {}, stopJobs = [];
-        eachLeaf(stopLayer, function(l){
+        // MODIFIED: Export -- imported points (halte icon) are exported together with the stops
+        eachLeaf({ eachLayer: function(fn){ stopLayer.eachLayer(fn); ExtLayers.group.eachLayer(fn); } }, function(l){
             if(!(l instanceof L.Marker)) return;
             const ic = l.options.icon && l.options.icon.options;
             if(!ic || !ic.iconUrl) return;
