@@ -344,6 +344,12 @@ select.ctl{ appearance:auto; }
 .li-hex.invalid{ border-color:var(--err); box-shadow:0 0 0 2px var(--err-soft); }
 .li-ls{ height:22px; margin:3px 0 0 4px; padding:0 4px; border:1px solid var(--border); border-radius:6px; background:var(--card); color:var(--text); font-size:11px; outline:none; }
 .li-ls:focus{ border-color:var(--c-accent); box-shadow:0 0 0 2px rgba(41,116,176,.25); }
+.li-drag{ display:inline-block; margin-right:5px; cursor:grab; touch-action:none; user-select:none; color:var(--text2); font-weight:800; letter-spacing:-2px; line-height:1; }
+.li-drag:focus-visible{ outline:2px solid var(--c-accent); border-radius:3px; }
+.layer-item.dragging{ opacity:.55; }
+.layer-item.drop-before{ box-shadow:0 -2px 0 var(--c-accent); }
+.layer-item.drop-after{ box-shadow:0 2px 0 var(--c-accent); }
+body.dragging-layer, body.dragging-layer *{ cursor:grabbing !important; user-select:none; }
 .layer-item.is-ext .li-sub::before{ content:"Imported \00b7 "; font-weight:700; }
 /* MODIFIED: Remove black outline around clicked routes (browser focus ring drawn on the clicked SVG path) */
 .leaflet-container .leaflet-interactive:focus,
@@ -3830,7 +3836,7 @@ function renderLayerPanel(){
         '<div class="layer-item' + (e.visible ? '' : ' is-hidden') + '" data-key="' + esc(e.key) + '">' +
             '<input type="checkbox" class="li-cmp" title="Include in comparison, overlap analysis and exports"' + (e.compare ? ' checked' : '') + '>' +
             '<input type="color" class="li-color" value="' + e.color + '" title="Choose layer colour" ' + (colorMode !== 'custom' ? 'disabled' : '') + '>' +
-            '<div class="li-txt"><div class="li-title" title="' + esc(entryTitle(e)) + '">' + (e.type === 'route' ? 'Route ' : '') + esc(entryTitle(e)) + '</div>' +
+            '<div class="li-txt"><div class="li-title" title="' + esc(entryTitle(e)) + '"><span class="li-drag" tabindex="0" role="button" title="Drag to reorder (or Alt + Up / Down)" aria-label="Reorder layer">\u2807\u2807</span>' + (e.type === 'route' ? 'Route ' : '') + esc(entryTitle(e)) + '</div>' +
             '<div class="li-sub">' + sub + '</div>' +
             // MODIFIED: Active-Layer colour -- HEX field (custom colour mode only)
             (colorMode === 'custom' ? '<input type="text" class="li-hex" value="' + String(e.color).toUpperCase() + '" maxlength="7" spellcheck="false" placeholder="#RRGGBB" title="HEX colour, e.g. #1C418A" aria-label="HEX colour">' : '') +
@@ -3850,7 +3856,7 @@ function renderLayerPanel(){
         '<div class="layer-item is-ext' + (x.visible ? '' : ' is-hidden') + '" data-ext="' + esc(x.id) + '">' +
             '<input type="checkbox" class="li-cmp" title="Use as a comparison layer in the buffer analysis"' + (x.compare ? ' checked' : '') + '>' +
             '<input type="color" class="li-color" value="' + x.color + '" title="Choose layer colour">' +
-            '<div class="li-txt"><div class="li-title" title="' + esc(x.name) + '">' + esc(x.name) + '</div>' +
+            '<div class="li-txt"><div class="li-title" title="' + esc(x.name) + '"><span class="li-drag" tabindex="0" role="button" title="Drag to reorder (or Alt + Up / Down)" aria-label="Reorder layer">\u2807\u2807</span>' + esc(x.name) + '</div>' +
             '<div class="li-sub">' + x.nFeat + ' feature' + (x.nFeat === 1 ? '' : 's') + '</div>' +
             '<input type="text" class="li-hex" value="' + x.color.toUpperCase() + '" maxlength="7" spellcheck="false" placeholder="#RRGGBB" title="HEX colour, e.g. #1C418A" aria-label="HEX colour">' + lineStyleSelect(x.lineStyle) + '</div>' +
             '<div class="li-act">' +
@@ -4155,6 +4161,15 @@ const ExtLayers = (function(){
         else if(act === 'zoom') zoom(id);
         else if(act === 'rm') remove(id);
     }
+    // MODIFIED: Layer reorder -- ids in list order (top first); the first one is drawn on top
+    function reorder(ids){
+        let next = new Map();
+        ids.forEach(function(id){ if(items.has(id)) next.set(id, items.get(id)); });
+        items.forEach(function(x, id){ if(!next.has(id)) next.set(id, x); });
+        items.clear(); next.forEach(function(x, id){ items.set(id, x); });
+        Array.from(items.values()).reverse().forEach(function(x){ if(x.visible && x.layer.bringToFront) x.layer.bringToFront(); });
+        refreshSources();
+    }
     function setLineStyle(id, v){ let x = items.get(id); if(!x) return; x.lineStyle = v; x.layer.setStyle(x.styleFn); }
     function setCompare(id, v){ let x = items.get(id); if(x) x.compare = !!v; }
 
@@ -4219,7 +4234,7 @@ const ExtLayers = (function(){
         importFiles(files);
     });
 
-    return { group: group, entries: entries, get: get, setColor: setColor, setCompare: setCompare, setLineStyle: setLineStyle, action: action };
+    return { reorder: reorder, group: group, entries: entries, get: get, setColor: setColor, setCompare: setCompare, setLineStyle: setLineStyle, action: action };
 })();
 window.ExtLayers = ExtLayers;   // MODIFIED: Export -- read by the PNG / KML / GeoJSON export code
 
@@ -5832,6 +5847,80 @@ $id('layerList').addEventListener('change', function(ev){
     e.compare = ev.target.checked;
     changed(true);
 });
+
+// MODIFIED: Layer reorder -- drag the grip (mouse, touch or pen) or press Alt + Up / Down on it.
+// GTFS layers and imported layers are reordered within their own group; the top of the list is drawn on top.
+function reorderLayersFromDom(){
+    let list = $id('layerList');
+    let keys = Array.from(list.querySelectorAll('.layer-item[data-key]')).map(function(i){ return i.getAttribute('data-key'); });
+    let pairs = keys.map(function(k){ return [k, registry.get(k)]; }).filter(function(p){ return p[1]; });
+    registry.clear();
+    pairs.forEach(function(p){ registry.set(p[0], p[1]); });
+    pairs.slice().reverse().forEach(function(p){ let l = p[1].layer; if(l && map.hasLayer(l) && l.bringToFront) l.bringToFront(); });
+    ExtLayers.reorder(Array.from(list.querySelectorAll('.layer-item[data-ext]')).map(function(i){ return i.getAttribute('data-ext'); }));
+    changed(true);
+}
+(function(){
+    let list = $id('layerList'), drag = null;
+    function sameKind(a, b){ return a.hasAttribute('data-ext') === b.hasAttribute('data-ext'); }
+    function clearMarks(){ list.querySelectorAll('.drop-before, .drop-after').forEach(function(n){ n.classList.remove('drop-before', 'drop-after'); }); }
+    function scroller(){
+        for(let n = list.parentElement; n; n = n.parentElement){
+            let o = getComputedStyle(n).overflowY;
+            if((o === 'auto' || o === 'scroll') && n.scrollHeight > n.clientHeight) return n;
+        }
+        return null;
+    }
+    function end(commit){
+        if(!drag) return;
+        let d = drag; drag = null;
+        d.item.classList.remove('dragging'); document.body.classList.remove('dragging-layer'); clearMarks();
+        if(commit && d.target){
+            d.target.parentNode.insertBefore(d.item, d.before ? d.target : d.target.nextSibling);
+            reorderLayersFromDom();
+        }
+    }
+    list.addEventListener('pointerdown', function(ev){
+        let h = ev.target.closest('.li-drag'); if(!h) return;
+        let item = h.closest('.layer-item'); if(!item) return;
+        ev.preventDefault();
+        drag = { item: item, target: null, before: true, pid: ev.pointerId, h: h };
+        item.classList.add('dragging'); document.body.classList.add('dragging-layer');
+        try { h.setPointerCapture(ev.pointerId); } catch(e){}
+    });
+    list.addEventListener('pointermove', function(ev){
+        if(!drag || ev.pointerId !== drag.pid) return;
+        clearMarks(); drag.target = null;
+        let sc = scroller();
+        if(sc){                                           // auto-scroll near the edges of the panel
+            let r = sc.getBoundingClientRect();
+            if(ev.clientY < r.top + 36) sc.scrollTop -= 12; else if(ev.clientY > r.bottom - 36) sc.scrollTop += 12;
+        }
+        let el = document.elementFromPoint(ev.clientX, ev.clientY);
+        let over = el && el.closest ? el.closest('.layer-item') : null;
+        if(over && over !== drag.item && list.contains(over) && sameKind(over, drag.item)){
+            let r2 = over.getBoundingClientRect();
+            drag.before = ev.clientY < r2.top + r2.height / 2;
+            drag.target = over;
+            over.classList.add(drag.before ? 'drop-before' : 'drop-after');
+        }
+    });
+    list.addEventListener('pointerup', function(ev){ if(drag && ev.pointerId === drag.pid) end(true); });
+    list.addEventListener('pointercancel', function(){ end(false); });
+    list.addEventListener('keydown', function(ev){
+        if(!ev.altKey || (ev.key !== 'ArrowUp' && ev.key !== 'ArrowDown')) return;
+        let h = ev.target.closest('.li-drag'); if(!h) return;
+        let item = h.closest('.layer-item'); if(!item) return;
+        let sib = ev.key === 'ArrowUp' ? item.previousElementSibling : item.nextElementSibling;
+        if(!sib || !sib.classList.contains('layer-item') || !sameKind(sib, item)) return;
+        ev.preventDefault();
+        let up = ev.key === 'ArrowUp';
+        item.parentNode.insertBefore(item, up ? sib : sib.nextSibling);
+        reorderLayersFromDom();
+        let again = list.querySelector('.layer-item[' + (item.hasAttribute('data-ext') ? 'data-ext' : 'data-key') + '="' + (item.getAttribute('data-ext') || item.getAttribute('data-key')) + '"] .li-drag');
+        if(again) again.focus();
+    });
+})();
 
 // MODIFIED: Active-Layer colour -- native picker + HEX field, both update the layer immediately.
 // Nothing here re-renders the list, so the native colour picker keeps working with click / hold / drag.
